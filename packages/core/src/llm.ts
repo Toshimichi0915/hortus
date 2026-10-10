@@ -30,4 +30,6 @@ export type CompletionRequest = { model: string; system: string; messages: Messa
 export interface Provider {
   /** Streams one assistant turn, calling onText for each text delta. */
   complete(req: CompletionRequest, onText: (text: string) => void): Promise<AssistantMessage>;
+  /** Model ids usable as CompletionRequest.model. */
+  listModels(): Promise<string[]>;
 }

@@ -2,6 +2,7 @@ import { stdin, stdout } from "node:process";
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
 import {
+  listModels,
   loadConfig,
   loadSecrets,
   openSession,
@@ -67,6 +68,13 @@ config
   .command("set-model")
   .argument("<id>")
   .action(async (model: string) => saveConfig({ ...(await loadConfig()), model }));
+
+config
+  .command("models")
+  .description("list models of every provider with an API key")
+  .action(async () => {
+    for (const { provider, id } of await listModels()) console.log(`${provider}: ${id}`);
+  });
 
 config
   .command("set-key")

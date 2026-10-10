@@ -2,20 +2,17 @@ import { exec } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { loadConfig, type ProviderName } from "./config.ts";
+import { loadConfig, PROVIDERS, type ProviderName } from "./config.ts";
 import { type Message, type Provider, type ToolCall, type ToolResult, tool } from "./llm.ts";
 import { anthropicProvider } from "./providers/anthropic.ts";
 import { openaiProvider } from "./providers/openai.ts";
+import { openrouterProvider } from "./providers/openrouter.ts";
 import { loadSecrets } from "./secrets.ts";
 
 const sh = promisify(exec);
 
 const providers: Record<ProviderName, (apiKey: string) => { provider: Provider; defaultModel: string }> = {
-  // OpenRouter is OpenAI-compatible
-  openrouter: (apiKey) => ({
-    provider: openaiProvider({ apiKey, baseURL: "https://openrouter.ai/api/v1" }),
-    defaultModel: "anthropic/claude-sonnet-5.5",
-  }),
+  openrouter: (apiKey) => ({ provider: openrouterProvider({ apiKey }), defaultModel: "anthropic/claude-sonnet-5.5" }),
   openai: (apiKey) => ({ provider: openaiProvider({ apiKey }), defaultModel: "gpt-5" }),
   anthropic: (apiKey) => ({ provider: anthropicProvider({ apiKey }), defaultModel: "claude-opus-5-5" }),
 };
@@ -30,6 +27,19 @@ async function resolveProvider() {
   if (!apiKey) throw new Error(`No API key for ${name}. Run: kanai config set-key ${name}`);
   const { provider, defaultModel } = providers[name](apiKey);
   return { provider, model: config.model ?? defaultModel };
+}
+
+/** Models of every provider that has an API key set. */
+export async function listModels() {
+  const secrets = await loadSecrets();
+  const lists = await Promise.all(
+    PROVIDERS.map(async (name) => {
+      const apiKey = secrets[name]?.apiKey;
+      if (!apiKey) return [];
+      return (await providers[name](apiKey).provider.listModels()).map((id) => ({ provider: name, id }));
+    }),
+  );
+  return lists.flat();
 }
 
 const system = `You are a coding agent. Working directory: ${process.cwd()}. Use tools to inspect and change files.`;

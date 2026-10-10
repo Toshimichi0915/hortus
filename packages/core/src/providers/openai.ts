@@ -29,6 +29,11 @@ function toOpenAI(m: Message): OpenAI.ChatCompletionMessageParam[] {
 export function openaiProvider(options?: ConstructorParameters<typeof OpenAI>[0]): Provider {
   const client = new OpenAI(options);
   return {
+    async listModels() {
+      const ids: string[] = [];
+      for await (const m of client.models.list()) ids.push(m.id);
+      return ids;
+    },
     async complete({ model, system, messages, tools }: CompletionRequest, onText): Promise<AssistantMessage> {
       const stream = client.chat.completions.stream({
         model,
