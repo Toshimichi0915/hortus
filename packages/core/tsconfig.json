@@ -1,0 +1,9 @@
+{
+  "extends": "../../typescript.json",
+  "compilerOptions": {
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"]
+}

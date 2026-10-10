@@ -1,0 +1,16 @@
+{
+  "name": "@kanai/core",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.132.1",
+    "openai": "^7.31.0",
+    "zod": "^4.6.5"
+  }
+}

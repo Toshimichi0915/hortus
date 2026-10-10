@@ -1,0 +1,30 @@
+{
+  "name": "kanai",
+  "version": "0.1.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc -b packages/cli",
+    "dev": "tsc -b packages/cli && node packages/cli/dist/index.js",
+    "lint": "biome lint",
+    "format": "biome format --write",
+    "test": "tsc -b packages/cli && node --test 'packages/cli/dist/**/*.test.js'"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.9.1",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@12.9.1",
+  "type": "module",
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2"
+  }
+}

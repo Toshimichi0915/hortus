@@ -1,0 +1,15 @@
+{
+  "extends": "../../typescript.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "jsx": "react-jsx",
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src"],
+  "references": [
+    {
+      "path": "../core"
+    }
+  ]
+}
