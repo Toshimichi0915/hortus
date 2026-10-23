@@ -2,6 +2,7 @@ import { stdin, stdout } from "node:process";
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
 import {
+  lastEntryId,
   listModels,
   loadConfig,
   loadSecrets,
@@ -29,9 +30,9 @@ async function promptHidden(question: string) {
 
 const provider = () => new Argument("<provider>").choices(PROVIDERS);
 const program = new Command("kanai")
-  .option("--resume [uuid]", "resume the latest session, or the one matching uuid")
+  .option("-r, --resume [uuid]", "resume the latest session, or the one matching uuid")
   .action(async ({ resume }: { resume?: string | true }) => {
-    const session = await openSession(resume);
+    const session = await openSession(resume ? await lastEntryId(resume) : null);
     // report button presses, drags and wheel (1002) in SGR encoding (1006); always switched back off on exit
     stdout.write("\x1b[?1002h\x1b[?1006h");
     process.on("exit", () => stdout.write("\x1b[?1002l\x1b[?1006l"));

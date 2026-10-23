@@ -18,15 +18,16 @@ const providers: Record<ProviderName, (apiKey: string) => { provider: Provider; 
 };
 
 // resolved per run (not at import) so `kanai config` works before a key is set, and config edits apply without restart
-async function resolveProvider() {
+async function resolveProvider(model?: string, providerOverride?: ProviderName) {
   const config = await loadConfig();
-  const name = config.provider;
+  const name = providerOverride ?? config.provider;
   if (!name) throw new Error("No provider selected. Run: kanai config set-provider <provider>");
   // explicit key so the SDKs never fall back to their env vars
   const apiKey = (await loadSecrets())[name]?.apiKey;
   if (!apiKey) throw new Error(`No API key for ${name}. Run: kanai config set-key ${name}`);
   const { provider, defaultModel } = providers[name](apiKey);
-  return { provider, model: config.model ?? defaultModel };
+  // config.model belongs to config.provider, so it doesn't carry over to another provider
+  return { provider, model: model ?? (name === config.provider ? config.model : undefined) ?? defaultModel };
 }
 
 /** Models of every provider that has an API key set. */
@@ -95,9 +96,14 @@ export type AgentEvent =
   /** a new message to append to the history */
   | { type: "message"; message: Message };
 
-/** Runs the tool loop on top of `history` until the model stops calling tools. */
-export async function* runAgent(history: Message[], onText: (text: string) => void): AsyncGenerator<AgentEvent> {
-  const { provider, model } = await resolveProvider();
+/** Runs the tool loop on top of `history` until the model stops calling tools. `model` overrides the config. */
+export async function* runAgent(
+  history: Message[],
+  onText: (text: string) => void,
+  modelOverride?: string,
+  providerOverride?: ProviderName,
+): AsyncGenerator<AgentEvent> {
+  const { provider, model } = await resolveProvider(modelOverride, providerOverride);
   const messages = [...history];
   for (let step = 0; step < maxSteps; step++) {
     const assistant = await provider.complete({ model, system, messages, tools }, onText);

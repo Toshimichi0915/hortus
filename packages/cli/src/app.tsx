@@ -1,11 +1,10 @@
-import { type Message, runAgent } from "@kanai/core";
+import { type Message, PROVIDERS, type ProviderName, runAgent, type Session } from "@kanai/core";
 import { Box, type BoxProps, type DOMElement, Text, useApp, useBoxMetrics, useInput, useWindowSize } from "ink";
 import { type ReactNode, useRef, useState } from "react";
 import { type Entry, entry } from "./entry.ts";
 import { PromptInput } from "./prompt-input.tsx";
 import { Transcript } from "./transcript.tsx";
 
-type Session = { path: string; messages: Message[]; append: (msgs: Message[]) => Promise<void> };
 /** Clips children to its own height. `fromBottom` = rows scrolled up from the end, so 0 follows new content. */
 function ScrollBox({ fromBottom, children, ...props }: BoxProps & { fromBottom: number; children: ReactNode }) {
   const view = useRef<DOMElement>(null);
@@ -32,7 +31,10 @@ const clamp = (n: number) => Math.max(0, Math.min(n, 10_000));
 
 export function App({ session }: { session: Session }) {
   const [entries, setEntries] = useState(() => [
-    entry("info", `Session: ${session.path} (${session.messages.length} messages)`),
+    entry(
+      "info",
+      `Session: ${session.path} (${session.messages.length} messages)${session.provider ? ` · provider: ${session.provider}` : ""}${session.model ? ` · model: ${session.model}` : ""}`,
+    ),
   ]);
   const [live, setLive] = useState("");
   const [input, setInput] = useState("");
@@ -60,15 +62,34 @@ export function App({ session }: { session: Session }) {
     setInput("");
     setInScroll(0);
     setCopied(undefined);
+    const cmd = value.trim().match(/^\/model(?:\s+(\S+))?$/);
+    if (cmd) {
+      if (!cmd[1]) return push(entry("info", `Model: ${session.model ?? "(config default)"}`));
+      await session.setModel(cmd[1]);
+      return push(entry("info", `Model set to ${cmd[1]}`));
+    }
+    const pcmd = value.trim().match(/^\/provider(?:\s+(\S+))?$/);
+    if (pcmd) {
+      if (!pcmd[1]) return push(entry("info", `Provider: ${session.provider ?? "(config default)"}`));
+      if (!PROVIDERS.includes(pcmd[1] as ProviderName))
+        return push(entry("error", `Unknown provider: ${pcmd[1]} (${PROVIDERS.join(", ")})`));
+      await session.setProvider(pcmd[1] as ProviderName);
+      return push(entry("info", `Provider set to ${pcmd[1]}`));
+    }
     setBusy(true);
     push(entry("user", value));
     const turn: Message[] = [{ role: "user", content: value }];
     let text = "";
     try {
-      for await (const event of runAgent([...session.messages, ...turn], (delta) => {
-        text += delta;
-        setLive(text);
-      })) {
+      for await (const event of runAgent(
+        [...session.messages, ...turn],
+        (delta) => {
+          text += delta;
+          setLive(text);
+        },
+        session.model,
+        session.provider,
+      )) {
         if (event.type === "tool-call") push(entry("tool", `[${event.call.name}] ${JSON.stringify(event.call.input)}`));
         else {
           // an assistant message closes the streamed text
