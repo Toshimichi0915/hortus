@@ -1,4 +1,4 @@
-import { type Message, PROVIDERS, type ProviderName, runAgent, type Session } from "@kanai/core";
+import { type Message, PROVIDERS, type ProviderName, runAgent, type Session } from "@phi/core";
 import { Box, type BoxProps, type DOMElement, Text, useApp, useBoxMetrics, useInput, useWindowSize } from "ink";
 import { type ReactNode, useRef, useState } from "react";
 import { type Entry, entry } from "./entry.ts";

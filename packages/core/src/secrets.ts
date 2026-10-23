@@ -1,7 +1,7 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import * as z from "zod";
-import { KANAI_DIR } from "./config.ts";
+import { PHI_DIR } from "./config.ts";
 
 const ApiKeySchema = z
   .object({
@@ -19,7 +19,7 @@ export type Secrets = z.infer<typeof SecretsSchema>;
 
 export async function loadSecrets(): Promise<Secrets> {
   try {
-    return SecretsSchema.parse(await JSON.parse(await readFile(join(KANAI_DIR, "secrets.json"), "utf8")));
+    return SecretsSchema.parse(await JSON.parse(await readFile(join(PHI_DIR, "secrets.json"), "utf8")));
   } catch (e) {
     if (e instanceof z.ZodError || (e as NodeJS.ErrnoException).code === "ENOENT") return {};
     throw e;
@@ -27,8 +27,8 @@ export async function loadSecrets(): Promise<Secrets> {
 }
 
 export async function saveSecrets(data: Secrets) {
-  await mkdir(KANAI_DIR, { recursive: true, mode: 0o700 });
-  const path = join(KANAI_DIR, "secrets.json");
+  await mkdir(PHI_DIR, { recursive: true, mode: 0o700 });
+  const path = join(PHI_DIR, "secrets.json");
   await writeFile(path, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
   await chmod(path, 0o600);
 }

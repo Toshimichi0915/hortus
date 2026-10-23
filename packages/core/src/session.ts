@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { KANAI_DIR, type ProviderName } from "./config.ts";
+import { PHI_DIR, type ProviderName } from "./config.ts";
 import type { Message } from "./llm.ts";
 
-export const sessionsDir = join(KANAI_DIR, "sessions");
+export const sessionsDir = join(PHI_DIR, "sessions");
 
 /** One jsonl line. Entries form a tree via parentId; a branch is the path from a leaf up to the root. */
 export type SessionEntry = { v: 1; id: string; parentId: string | null } & EntryBody;

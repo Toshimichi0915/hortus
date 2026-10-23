@@ -11,7 +11,7 @@ import {
   type ProviderName,
   saveConfig,
   saveSecrets,
-} from "@kanai/core";
+} from "@phi/core";
 import { Argument, Command } from "commander";
 import { render } from "ink";
 import { App } from "./app.tsx";
@@ -29,7 +29,7 @@ async function promptHidden(question: string) {
 }
 
 const provider = () => new Argument("<provider>").choices(PROVIDERS);
-const program = new Command("kanai")
+const program = new Command("phi")
   .option("-r, --resume [uuid]", "resume the latest session, or the one matching uuid")
   .action(async ({ resume }: { resume?: string | true }) => {
     const session = await openSession(resume ? await lastEntryId(resume) : null);

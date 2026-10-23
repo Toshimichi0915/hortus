@@ -17,14 +17,14 @@ const providers: Record<ProviderName, (apiKey: string) => { provider: Provider; 
   anthropic: (apiKey) => ({ provider: anthropicProvider({ apiKey }), defaultModel: "claude-opus-5-5" }),
 };
 
-// resolved per run (not at import) so `kanai config` works before a key is set, and config edits apply without restart
+// resolved per run (not at import) so `phi config` works before a key is set, and config edits apply without restart
 async function resolveProvider(model?: string, providerOverride?: ProviderName) {
   const config = await loadConfig();
   const name = providerOverride ?? config.provider;
-  if (!name) throw new Error("No provider selected. Run: kanai config set-provider <provider>");
+  if (!name) throw new Error("No provider selected. Run: phi config set-provider <provider>");
   // explicit key so the SDKs never fall back to their env vars
   const apiKey = (await loadSecrets())[name]?.apiKey;
-  if (!apiKey) throw new Error(`No API key for ${name}. Run: kanai config set-key ${name}`);
+  if (!apiKey) throw new Error(`No API key for ${name}. Run: phi config set-key ${name}`);
   const { provider, defaultModel } = providers[name](apiKey);
   // config.model belongs to config.provider, so it doesn't carry over to another provider
   return { provider, model: model ?? (name === config.provider ? config.model : undefined) ?? defaultModel };

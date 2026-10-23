@@ -1,9 +1,9 @@
 {
-  "name": "@kanai/cli",
+  "name": "@phi/cli",
   "version": "0.1.0",
   "type": "module",
   "dependencies": {
-    "@kanai/core": "workspace:*",
+    "@phi/core": "workspace:*",
     "commander": "^15.0.0",
     "ink": "^8.0.0",
     "react": "^19.3.0",

@@ -178,7 +178,7 @@ importers:
 
   packages/cli:
     dependencies:
-      '@kanai/core':
+      '@phi/core':
         specifier: workspace:*
         version: link:../core
       commander:
