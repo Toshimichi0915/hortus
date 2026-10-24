@@ -62,7 +62,6 @@ export interface Provider {
 
 export interface ProviderDef {
   create: (secret: { apiKey: string; endpoint?: string }) => Provider;
-  defaultModel: string;
 }
 
 /** Payload of each event; handlers may mutate it (e.g. push to `system`). */

@@ -15,11 +15,9 @@ export const builtin: Plugin = {
   providers: {
     openai: {
       create: ({ apiKey, endpoint }) => openaiProvider({ apiKey, baseURL: endpoint }),
-      defaultModel: "gpt-6.1-sol",
     },
     anthropic: {
       create: ({ apiKey, endpoint }) => anthropicProvider({ apiKey, baseURL: endpoint }),
-      defaultModel: "claude-opus-5-5",
     },
   },
   tools: [readTool, editTool, writeTool, bashTool],

@@ -58,7 +58,8 @@ export async function createAgent(plugin?: Plugin) {
     if (!def) throw new Error(`Unknown provider type: ${secret.type} (${Object.keys(providers).join(", ")})`);
     const provider = def.create(secret);
     // config.model belongs to config.provider, so it doesn't carry over to another provider
-    const model = opts.model ?? (name === config.provider ? config.model : undefined) ?? def.defaultModel;
+    const model = opts.model ?? (name === config.provider ? config.model : undefined);
+    if (!model) throw new Error("No model selected. Run: phi config set-model <model>");
 
     const start = { system: [] as string[] };
     await emit("session_start", start);

@@ -24,7 +24,7 @@ test("loadPlugins merges plugins over the built-ins, dependencies first", async 
       optionalDependencies: { missing: "*" },
     },
     `export default {
-      providers: { fake: { create: () => ({}), defaultModel: "m" } },
+      providers: { fake: { create: () => ({}) } },
       tools: [{ name: "read", description: "override", inputSchema: null, execute: async () => "" }],
       on: { session_start: ({ system }) => { system.push("from a"); } },
     };`,
