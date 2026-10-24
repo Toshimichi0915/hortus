@@ -20,5 +20,21 @@
   },
   "devDependencies": {
     "@types/react": "^19.3.0"
+  },
+  "license": "MIT",
+  "files": [
+    "dist",
+    "!dist/**/*.test.*"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Toshimichi0915/hortus.git",
+    "directory": "packages/cli"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "hortus": "dist/index.js"
   }
 }

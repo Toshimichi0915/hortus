@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { stdout } from "node:process";
