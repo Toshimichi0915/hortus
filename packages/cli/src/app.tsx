@@ -1,6 +1,6 @@
 import { type Agent, createAgent, type Message, type Session, type ToolCall } from "@phi/core";
 import { Box, type BoxProps, type DOMElement, Text, useApp, useBoxMetrics, useInput, useWindowSize } from "ink";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { type Entry, entry, formatTool, theme } from "./entry.ts";
 import { PromptInput } from "./prompt-input.tsx";
 import { Transcript } from "./transcript.tsx";
@@ -201,17 +201,19 @@ export function App({ session, providers }: { session: Session; providers: strin
     </Box>
   );
 
+  // stable across keystrokes, so Transcript doesn't re-wrap the whole history on every key
+  const shown = useMemo(
+    () => [
+      ...entries,
+      ...(live.thinking ? [{ id: -2, kind: "thinking" as const, text: live.thinking }] : []),
+      ...(live.text ? [{ id: -1, kind: "assistant" as const, text: live.text }] : []),
+    ],
+    [entries, live],
+  );
+
   return (
     <Box flexDirection="column" height={rows}>
-      <Transcript
-        entries={[
-          ...entries,
-          ...(live.thinking ? [{ id: -2, kind: "thinking" as const, text: live.thinking }] : []),
-          ...(live.text ? [{ id: -1, kind: "assistant" as const, text: live.text }] : []),
-        ]}
-        onWheelBelow={(delta) => setInScroll((n) => clamp(n + delta))}
-        onCopy={setCopied}
-      />
+      <Transcript entries={shown} onWheelBelow={(delta) => setInScroll((n) => clamp(n + delta))} onCopy={setCopied} />
       {prompt}
       <Box justifyContent="space-between">
         <Text color={theme.dim} wrap="truncate">

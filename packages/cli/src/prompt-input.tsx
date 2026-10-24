@@ -47,22 +47,27 @@ export function PromptInput({
   // the parent may shorten the value (submit, clear)
   const pos = Math.min(cursor, chars.length);
 
-  const insert = (text: string) => {
-    onChange(chars.slice(0, pos).join("") + text + chars.slice(pos).join(""));
-    setCursor(pos + [...text].length);
+  // keys can arrive faster than renders (e.g. held Backspace while a reply streams), so each one
+  // builds on the previous key's result, not on this render's possibly stale props
+  const latest = useRef({ chars, pos });
+  latest.current = { chars, pos };
+  const update = (next: string[], at: number) => {
+    latest.current = { chars: next, pos: at };
+    onChange(next.join(""));
+    setCursor(at);
   };
 
   useInput((input, key) => {
+    const { chars, pos } = latest.current;
+    const insert = (text: string) =>
+      update([...chars.slice(0, pos), ...text, ...chars.slice(pos)], pos + [...text].length);
     if (key.return) {
       if (key.shift || key.meta) insert("\n");
-      else onSubmit(value);
-    } else if (key.leftArrow) setCursor(Math.max(0, pos - 1));
-    else if (key.rightArrow) setCursor(Math.min(chars.length, pos + 1));
+      else onSubmit(chars.join(""));
+    } else if (key.leftArrow) update(chars, Math.max(0, pos - 1));
+    else if (key.rightArrow) update(chars, Math.min(chars.length, pos + 1));
     else if (key.backspace || key.delete) {
-      if (pos > 0) {
-        onChange(chars.slice(0, pos - 1).join("") + chars.slice(pos).join(""));
-        setCursor(pos - 1);
-      }
+      if (pos > 0) update([...chars.slice(0, pos - 1), ...chars.slice(pos)], pos - 1);
     } else if (input && !key.ctrl && !key.meta) insert(input.replace(/\r\n?/g, "\n"));
   });
 
