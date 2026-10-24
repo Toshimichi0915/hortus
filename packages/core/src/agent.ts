@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.ts";
-import type { Message, Plugin, Tool, ToolCall, ToolResult } from "./llm.ts";
+import type { Image, Message, Plugin, Tool, ToolCall, ToolResult } from "./llm.ts";
 import { loadPlugins } from "./plugins.ts";
 import { loadSecrets } from "./secrets.ts";
 
@@ -25,6 +25,7 @@ async function runTool(tools: Tool[], call: ToolCall): Promise<ToolResult> {
   if (!input.success) return { id: call.id, output: `Invalid input: ${input.error.message}`, isError: true };
   try {
     const output = await t.execute(input.data as never);
+    if ((output as Image | undefined)?.type === "image") return { id: call.id, output: "", image: output as Image };
     return { id: call.id, output: typeof output === "string" ? output : JSON.stringify(output) };
   } catch (e) {
     return { id: call.id, output: e instanceof Error ? e.message : String(e), isError: true };

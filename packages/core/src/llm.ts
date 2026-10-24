@@ -1,7 +1,9 @@
 import type { z } from "zod";
 
 export type ToolCall = { id: string; name: string; input: unknown };
-export type ToolResult = { id: string; output: string; isError?: boolean };
+/** Base64 image; return `{ type: "image", ... }` from a tool's execute to send it to the model. */
+export type Image = { type: "image"; mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp"; data: string };
+export type ToolResult = { id: string; output: string; image?: Image; isError?: boolean };
 
 export type Message =
   | { role: "user"; content: string }

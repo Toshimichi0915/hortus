@@ -32,7 +32,14 @@ function toAnthropic(m: Message): Anthropic.MessageParam[] {
           content: m.results.map((r) => ({
             type: "tool_result",
             tool_use_id: toolId(r.id),
-            content: r.output,
+            content: r.image
+              ? [
+                  {
+                    type: "image" as const,
+                    source: { type: "base64" as const, media_type: r.image.mediaType, data: r.image.data },
+                  },
+                ]
+              : r.output,
             is_error: r.isError,
           })),
         },

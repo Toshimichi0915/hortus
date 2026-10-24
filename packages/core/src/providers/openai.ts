@@ -20,8 +20,22 @@ function toOpenAI(m: Message): OpenAI.ChatCompletionMessageParam[] {
             : undefined,
         },
       ];
-    case "tool":
-      return m.results.map((r) => ({ role: "tool", tool_call_id: r.id, content: r.output }));
+    case "tool": {
+      // tool messages are text-only in Chat Completions, so images follow as a user message
+      const images = m.results.flatMap((r) =>
+        r.image
+          ? [{ type: "image_url" as const, image_url: { url: `data:${r.image.mediaType};base64,${r.image.data}` } }]
+          : [],
+      );
+      return [
+        ...m.results.map((r) => ({
+          role: "tool" as const,
+          tool_call_id: r.id,
+          content: r.image ? "Image attached in the next message." : r.output,
+        })),
+        ...(images.length ? [{ role: "user" as const, content: images }] : []),
+      ];
+    }
   }
 }
 

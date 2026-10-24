@@ -1,13 +1,22 @@
 import { exec } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
+import { extname } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { type Plugin, tool } from "./llm.ts";
+import { type Image, type Plugin, tool } from "./llm.ts";
 import { anthropicProvider } from "./providers/anthropic.ts";
 import { openaiProvider } from "./providers/openai.ts";
 import { openrouterProvider } from "./providers/openrouter.ts";
 
 const sh = promisify(exec);
+
+const imageTypes: Record<string, Image["mediaType"]> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+};
 
 /** Providers, tools and the base system prompt that ship with phi; loaded before any configured plugin. */
 export const builtin: Plugin = {
@@ -26,9 +35,13 @@ export const builtin: Plugin = {
   tools: [
     tool({
       name: "read",
-      description: "Read a file and return its contents.",
+      description: "Read a file and return its contents. Images (png, jpg, gif, webp) are returned as images.",
       inputSchema: z.object({ path: z.string() }),
-      execute: ({ path }) => readFile(path, "utf8"),
+      execute: async ({ path }) => {
+        const mediaType = imageTypes[extname(path).toLowerCase()];
+        if (!mediaType) return readFile(path, "utf8");
+        return { type: "image", mediaType, data: await readFile(path, "base64") } satisfies Image;
+      },
     }),
     tool({
       name: "write",
