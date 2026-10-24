@@ -2,9 +2,10 @@ import type { TextProps } from "ink";
 import stringWidth from "string-width";
 
 /** A run of text with one style; a rendered line is a list of these. */
-export type Span = Pick<TextProps, "color" | "bold" | "italic" | "dimColor" | "strikethrough" | "underline"> & {
+export interface Span
+  extends Pick<TextProps, "color" | "bold" | "italic" | "dimColor" | "strikethrough" | "underline"> {
   text: string;
-};
+}
 type Style = Omit<Span, "text">;
 
 // `code` | **bold** | __bold__ | ~~strike~~ | *italic* | _italic_ | [label](url)

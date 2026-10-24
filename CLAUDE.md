@@ -19,6 +19,7 @@ Tests run from compiled `dist/`, so build first. Single test file: `pnpm build &
 ## Conventions
 
 - Source imports use `.ts`/`.tsx` extensions; `rewriteRelativeImportExtensions` rewrites them on emit. ESM only, `verbatimModuleSyntax` (use `import type`), `noUncheckedIndexedAccess`.
+- Prefer `interface` over `type` for object shapes; use `type` only for unions, intersections, and other aliases an interface can't express.
 - Biome: 2-space indent, 120 cols, double quotes, organized imports.
 - `// ponytail:` comments mark deliberate shortcuts with a known ceiling and upgrade path.
 

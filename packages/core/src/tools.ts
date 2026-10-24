@@ -49,7 +49,12 @@ const normalizeFuzzy = (text: string) =>
     .replace(/[‐-―−]/g, "-")
     .replace(/[  -   　]/g, " ");
 
-type Match = { i: number; index: number; length: number; newText: string };
+interface Match {
+  i: number;
+  index: number;
+  length: number;
+  newText: string;
+}
 
 const replace = (text: string, matches: Match[], offset = 0) =>
   matches.reduceRight((s, m) => s.slice(0, m.index - offset) + m.newText + s.slice(m.index - offset + m.length), text);

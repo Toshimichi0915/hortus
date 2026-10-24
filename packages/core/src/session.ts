@@ -31,7 +31,11 @@ export interface Session extends SessionState {
   setProvider(provider: string): Promise<void>;
 }
 
-type Parser = { v: number; type: string; apply(entry: any, state: SessionState): void };
+interface Parser {
+  v: number;
+  type: string;
+  apply(entry: any, state: SessionState): void;
+}
 
 /** A line is replayed by the parser matching its v and type; lines no parser knows are skipped. */
 const parsers: Parser[] = [

@@ -9,8 +9,17 @@ import { markdown, type Span } from "./markdown.ts";
  * One screen row. `text` is its plain text and `spans` the same text styled.
  * `cont` = soft-wrapped continuation of the previous row (joined without a newline on copy).
  */
-export type Row = { kind: Entry["kind"]; text: string; spans: Span[]; cont: boolean; bold?: boolean };
-type Point = { row: number; col: number };
+export interface Row {
+  kind: Entry["kind"];
+  text: string;
+  spans: Span[];
+  cont: boolean;
+  bold?: boolean;
+}
+interface Point {
+  row: number;
+  col: number;
+}
 
 const graphemes = (s: string) => Array.from(new Intl.Segmenter().segment(s), (g) => g.segment);
 

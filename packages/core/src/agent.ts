@@ -32,7 +32,10 @@ async function runTool(tools: Tool[], call: ToolCall): Promise<ToolResult> {
   }
 }
 
-export type RunOptions = { model?: string; provider?: string };
+export interface RunOptions {
+  model?: string;
+  provider?: string;
+}
 
 /**
  * Loads config and plugins once (built-ins, config.plugins, then `plugin`). `run` reports progress as events

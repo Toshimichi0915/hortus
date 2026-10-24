@@ -1,10 +1,10 @@
 import type { ToolCall, ToolResult } from "@phi/core";
 
-export type Entry = {
+export interface Entry {
   id: number;
   kind: "info" | "user" | "thinking" | "assistant" | "tool" | "toolOk" | "toolError" | "error";
   text: string;
-};
+}
 
 /** Every entry ever shown, so fullscreen mode can print the conversation to normal scrollback on exit. */
 export const transcript: Entry[] = [];
@@ -16,13 +16,13 @@ export function entry(kind: Entry["kind"], text: string): Entry {
   return e;
 }
 
-type Style = {
+interface Style {
   color?: string;
   backgroundColor?: string;
   dimColor?: boolean;
   italic?: boolean;
   prefix?: string;
-};
+}
 
 export const styles: Record<Entry["kind"], Style> = {
   info: { dimColor: true },
