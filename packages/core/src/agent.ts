@@ -50,16 +50,16 @@ export async function createAgent(opts?: LoadOptions) {
   /** Provider name, model and provider instance a run with `opts` would use; throws if any is missing. */
   async function resolve(opts: Pick<RunOptions, "model" | "provider"> = {}) {
     const name = opts.provider ?? config.provider;
-    if (!name) throw new Error("No provider selected. Run: phi config set-provider <provider>");
+    if (!name) throw new Error("No provider selected. Set 'provider' in ~/.phi/config.json or use /provider");
     // read per run so a key set mid-session applies; explicit so the SDKs never fall back to their env vars
     const secret = (await loadSecrets())[name];
-    if (!secret) throw new Error(`No API key for ${name}. Run: phi config set-key ${name}`);
+    if (!secret) throw new Error(`No API key for ${name}. Add it to ~/.phi/secrets.json`);
     const def = providers[secret.type];
     if (!def) throw new Error(`Unknown provider type: ${secret.type} (${Object.keys(providers).join(", ")})`);
     const provider = def.create(secret);
     // config.model belongs to config.provider, so it doesn't carry over to another provider
     const model = opts.model ?? (name === config.provider ? config.model : undefined);
-    if (!model) throw new Error("No model selected. Run: phi config set-model <model>");
+    if (!model) throw new Error("No model selected. Set 'model' in ~/.phi/config.json or use /model");
     return { name, model, provider };
   }
 
