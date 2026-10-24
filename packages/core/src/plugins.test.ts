@@ -7,12 +7,12 @@ import { loadPlugins, sortManifests } from "./plugins.ts";
 
 async function writePlugin(dir: string, manifest: object, source: string) {
   await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, "phi.json"), JSON.stringify(manifest));
+  await writeFile(join(dir, "hortus.json"), JSON.stringify(manifest));
   await writeFile(join(dir, "index.mjs"), source);
 }
 
 test("loadPlugins merges plugins over the built-ins, dependencies first", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "phi-"));
+  const dir = await mkdtemp(join(tmpdir(), "hortus-"));
   // "a" sorts first but depends on "b", so "b" loads first and "a" overrides it
   await writePlugin(
     join(dir, "a"),
@@ -55,7 +55,7 @@ test("loadPlugins merges plugins over the built-ins, dependencies first", async 
   await writePlugin(join(dir, "c"), { name: "c", version: "1.0.0", entrypoint: "nope.mjs" }, "");
   await assert.rejects(loadPlugins(dir), /Failed to load plugin c/);
   await writePlugin(join(dir, "c"), { name: "c", version: "1.0", entrypoint: "index.mjs" }, "");
-  await assert.rejects(loadPlugins(dir), /Invalid .*phi\.json: .*invalid semver version/s);
+  await assert.rejects(loadPlugins(dir), /Invalid .*hortus\.json: .*invalid semver version/s);
 });
 
 test("sortManifests checks version ranges and rejects missing dependencies, cycles and duplicates", () => {
@@ -85,6 +85,9 @@ test("sortManifests checks version ranges and rejects missing dependencies, cycl
     () => sortManifests([m("a", { host: "^2.0.0" })], { host: "1.5.0" }),
     /a requires host@\^2\.0\.0, found 1\.5\.0/,
   );
-  assert.throws(() => sortManifests([m("host")], { host: "1.5.0" }), /Duplicate plugin host in host: phi provides it/);
+  assert.throws(
+    () => sortManifests([m("host")], { host: "1.5.0" }),
+    /Duplicate plugin host in host: hortus provides it/,
+  );
   assert.throws(() => sortManifests([m("a", { toString: "*" })]), /a requires missing plugin toString@\*/);
 });

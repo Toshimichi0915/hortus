@@ -225,7 +225,7 @@ export const bashTool = tool({
   description: `Execute a bash command in the current working directory. Returns stdout and stderr combined. Output is truncated to the last ${MAX_LINES} lines or ${MAX_BYTES / 1024}KB (whichever is hit first); the full output is then saved to a temp file.`,
   inputSchema: z.object({
     command: z.string().describe("Shell command to execute"),
-    // ponytail: pi has no default timeout because its tools can be aborted; phi's can't yet, so default to 120s
+    // ponytail: pi has no default timeout because its tools can be aborted; hortus's can't yet, so default to 120s
     timeout: z.number().positive().optional().describe("Timeout in seconds (default: 120)"),
   }),
   execute: async ({ command, timeout = 120 }) => {
@@ -251,7 +251,7 @@ export const bashTool = tool({
     const t = truncate(output, true);
     let text = t.content;
     if (t.truncated) {
-      const file = join(tmpdir(), `phi-bash-${randomUUID()}.log`);
+      const file = join(tmpdir(), `hortus-bash-${randomUUID()}.log`);
       await writeFile(file, output);
       if (t.shown === 0) {
         text = Buffer.from(t.lines.at(-1) as string)

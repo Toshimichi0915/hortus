@@ -1,4 +1,4 @@
-import type { SessionInfo } from "@phi/core";
+import type { SessionInfo } from "@hortus/core";
 import { Box, Text, useApp, useInput, useWindowSize } from "ink";
 import { useState } from "react";
 import { stamp, theme } from "./entry.ts";

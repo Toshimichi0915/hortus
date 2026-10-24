@@ -1,5 +1,5 @@
 {
-  "name": "@phi/cli",
+  "name": "@hortus/cli",
   "version": "0.1.0",
   "type": "module",
   "exports": {
@@ -12,7 +12,7 @@
     "node": ">=22.15"
   },
   "dependencies": {
-    "@phi/core": "workspace:*",
+    "@hortus/core": "workspace:*",
     "ink": "^8.0.0",
     "react": "^19.3.0",
     "string-width": "^8.3.0",

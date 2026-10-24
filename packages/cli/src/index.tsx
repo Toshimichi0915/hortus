@@ -1,30 +1,30 @@
 import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { stdout } from "node:process";
-import { createAgent, type LoadOptions, listSessions, openSession, type SessionInfo } from "@phi/core";
+import { createAgent, type LoadOptions, listSessions, openSession, type SessionInfo } from "@hortus/core";
 import { render } from "ink";
 import { App } from "./app.tsx";
 import { createCli } from "./cli.ts";
 import { SessionPicker } from "./session-picker.tsx";
 
-// a plugin's react/ink/@phi imports resolve from here, so its components run on our React and Ink (two Reacts break
-// hooks). Every importer, not just ~/.phi/plugins: a symlinked plugin's realpath lies outside it.
-const shared = /^(react|ink|@phi\/(core|cli))(\/|$)/;
+// a plugin's react/ink/@hortus imports resolve from here, so its components run on our React and Ink (two Reacts break
+// hooks). Every importer, not just ~/.hortus/plugins: a symlinked plugin's realpath lies outside it.
+const shared = /^(react|ink|@hortus\/(core|cli))(\/|$)/;
 registerHooks({ resolve: (s, c, next) => next(s, shared.test(s) ? { ...c, parentURL: import.meta.url } : c) });
 
 const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
   version: string;
 };
-// plugins can depend on "@phi/cli" in their phi.json; that's us
-const load: LoadOptions = { provided: { "@phi/cli": version } };
+// plugins can depend on "@hortus/cli" in their hortus.json; that's us
+const load: LoadOptions = { provided: { "@hortus/cli": version } };
 
-// `phi -r <id>` resumes that session, `phi -r` picks one from a list
+// `hortus -r <id>` resumes that session, `hortus -r` picks one from a list
 const [flag, id, ...rest] = process.argv.slice(2);
 const fail = (message: string) => {
   console.error(message);
   process.exit(1);
 };
-if ((flag && flag !== "-r") || rest.length) fail("usage: phi [-r [session_id]]");
+if ((flag && flag !== "-r") || rest.length) fail("usage: hortus [-r [session_id]]");
 let resume: SessionInfo | undefined;
 if (flag) {
   const sessions = await listSessions();

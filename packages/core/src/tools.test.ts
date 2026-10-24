@@ -52,7 +52,7 @@ test("truncate keeps head or tail within the line limit", () => {
 });
 
 test("read pages with offset/limit; edit keeps CRLF and BOM; bash reports exit codes", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "phi-"));
+  const dir = await mkdtemp(join(tmpdir(), "hortus-"));
   const f = join(dir, "f.txt");
   await writeFile(f, "1\n2\n3\n4");
   assert.equal(

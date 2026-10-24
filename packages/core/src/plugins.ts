@@ -4,10 +4,10 @@ import { pathToFileURL } from "node:url";
 import semver from "semver";
 import * as z from "zod";
 import { builtin } from "./builtin.ts";
-import { PHI_DIR } from "./config.ts";
+import { HORTUS_DIR } from "./config.ts";
 import type { Events, Plugin, ProviderDef, Tool } from "./llm.ts";
 
-export const PLUGINS_DIR = join(PHI_DIR, "plugins");
+export const PLUGINS_DIR = join(HORTUS_DIR, "plugins");
 
 /** plugin name -> npm-style version range, e.g. `{ "foo": "^1.2.0" }` */
 const Dependencies = z.record(
@@ -15,7 +15,7 @@ const Dependencies = z.record(
   z.string().refine((r) => semver.validRange(r) !== null, "invalid version range"),
 );
 
-/** `<plugin dir>/phi.json`. Dependencies load before (so are overridden by) this plugin. */
+/** `<plugin dir>/hortus.json`. Dependencies load before (so are overridden by) this plugin. */
 export const ManifestSchema = z.object({
   name: z.string(),
   version: z.string().refine((v) => semver.valid(v) !== null, "invalid semver version"),
@@ -30,13 +30,13 @@ export interface Manifest extends z.infer<typeof ManifestSchema> {
 
 /** Options shared by everything that loads plugins (`loadPlugins`, `createAgent`). */
 export interface LoadOptions {
-  /** names the host provides itself, e.g. `{ "@phi/cli": "0.1.0" }`; plugins depend on them like on any plugin */
+  /** names the host provides itself, e.g. `{ "@hortus/cli": "0.1.0" }`; plugins depend on them like on any plugin */
   provided?: Record<string, string>;
   /** loaded after every plugin, e.g. a caller observing a run */
   extra?: Plugin[];
 }
 
-/** Every `<dir>/<name>/phi.json`; directories without one are skipped. */
+/** Every `<dir>/<name>/hortus.json`; directories without one are skipped. */
 async function readManifests(dir: string): Promise<Manifest[]> {
   let names: string[];
   try {
@@ -47,7 +47,7 @@ async function readManifests(dir: string): Promise<Manifest[]> {
   }
   const manifests = await Promise.all(
     names.sort().map(async (name): Promise<Manifest | undefined> => {
-      const path = join(dir, name, "phi.json");
+      const path = join(dir, name, "hortus.json");
       let text: string;
       try {
         text = await readFile(path, "utf8");
@@ -74,7 +74,7 @@ export function sortManifests(manifests: Manifest[], provided: Record<string, st
   for (const m of manifests) {
     const dup = byName.get(m.name);
     if (dup) throw new Error(`Duplicate plugin ${m.name} in ${dup.dir} and ${m.dir}`);
-    if (Object.hasOwn(provided, m.name)) throw new Error(`Duplicate plugin ${m.name} in ${m.dir}: phi provides it`);
+    if (Object.hasOwn(provided, m.name)) throw new Error(`Duplicate plugin ${m.name} in ${m.dir}: hortus provides it`);
     byName.set(m.name, m);
   }
   const sorted: Manifest[] = [];

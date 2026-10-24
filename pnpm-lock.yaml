@@ -178,7 +178,7 @@ importers:
 
   packages/cli:
     dependencies:
-      '@phi/core':
+      '@hortus/core':
         specifier: workspace:*
         version: link:../core
       ink:

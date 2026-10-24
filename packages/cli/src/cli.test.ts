@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import { type Agent, openSession, type Plugin } from "@phi/core";
+import { type Agent, openSession, type Plugin } from "@hortus/core";
 import { createCli } from "./cli.ts";
 
 test("status follows the session's model and provider, and a stale resolve doesn't overwrite a newer one", async () => {
-  const session = await openSession(null, await mkdtemp(join(tmpdir(), "phi-")));
+  const session = await openSession(null, await mkdtemp(join(tmpdir(), "hortus-")));
   const resolve = async ({ model = "m0", provider = "p0" }: { model?: string; provider?: string }) => {
     // resolving "slow" finishes after a later change to "fast"
     if (model === "slow") await sleep(50);
@@ -32,7 +32,7 @@ test("status follows the session's model and provider, and a stale resolve doesn
 });
 
 test("streamed deltas reach the store once a frame, and none are lost when the reply ends", async () => {
-  const session = await openSession(null, await mkdtemp(join(tmpdir(), "phi-")));
+  const session = await openSession(null, await mkdtemp(join(tmpdir(), "hortus-")));
   let observer: Plugin | undefined;
   const run = async () => {
     for (const d of ["a", "b", "c"]) await observer?.on?.text?.(d);

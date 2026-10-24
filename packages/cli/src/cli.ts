@@ -1,4 +1,4 @@
-import type { Agent, Message, Plugin, Session, ToolCall } from "@phi/core";
+import type { Agent, Message, Plugin, Session, ToolCall } from "@hortus/core";
 import { createStore } from "zustand/vanilla";
 import type { CliPlugin } from "./api.ts";
 import { builtinCommands, type Command, findCommand, parseCommand } from "./commands.ts";

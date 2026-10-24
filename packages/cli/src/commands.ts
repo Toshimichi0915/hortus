@@ -1,5 +1,5 @@
 import { dirname } from "node:path";
-import { listSessions, openSession } from "@phi/core";
+import { listSessions, openSession } from "@hortus/core";
 import type { Cli } from "./cli.ts";
 import { stamp } from "./entry.ts";
 
@@ -94,7 +94,7 @@ export const builtinCommands: Command[] = [
       // no id: the first candidate, so Enter while they're still loading picks what it would have
       const s = (await listSessions(dirname(path))).find((s) => (arg ? s.id === arg : s.path !== path));
       if (!s) throw new Error(arg ? `Session not found: ${arg}` : "No sessions to resume");
-      // at its last entry, like `phi -r`
+      // at its last entry, like `hortus -r`
       cli.setSession(await openSession(s.leafId, dirname(path)));
     },
   },

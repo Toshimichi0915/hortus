@@ -4,13 +4,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import { type Agent, listSessions, openSession } from "@phi/core";
+import { type Agent, listSessions, openSession } from "@hortus/core";
 import { type Cli, createCli } from "./cli.ts";
 import { builtinCommands, type Command, findCommand, parseCommand } from "./commands.ts";
 
 // like agent.resolve with an empty config whose defaults are p0/m0, and no key for "nokey"
 const resolve = async ({ model = "m0", provider = "p0" }: { model?: string; provider?: string }) => {
-  if (provider === "nokey") throw new Error("No API key for nokey. Add it to ~/.phi/secrets.json");
+  if (provider === "nokey") throw new Error("No API key for nokey. Add it to ~/.hortus/secrets.json");
   return { name: provider, model, provider: {} };
 };
 
@@ -38,7 +38,7 @@ test("parseCommand splits one line into a name and, once a space follows it, an 
 });
 
 test("/model sets the session's provider and model, which status follows; a rejected one changes nothing", async () => {
-  const session = await openSession(null, await mkdtemp(join(tmpdir(), "phi-")));
+  const session = await openSession(null, await mkdtemp(join(tmpdir(), "hortus-")));
   const cli = await createCli(session, async () => ({ plugins: [], resolve }) as unknown as Agent);
   await sleep(10);
   assert.equal(await send(cli, "/model"), "info: Model: p0/m0");
@@ -57,7 +57,7 @@ test("/model sets the session's provider and model, which status follows; a reje
   );
   const state = { messages: [], provider: "openrouter", model: "anthropic/claude-x" };
   assert.deepEqual(session.getState(), state);
-  assert.equal(await send(cli, "/model nokey/m"), "error: No API key for nokey. Add it to ~/.phi/secrets.json");
+  assert.equal(await send(cli, "/model nokey/m"), "error: No API key for nokey. Add it to ~/.hortus/secrets.json");
   assert.equal(await send(cli, "/model foo"), "error: Usage: /model <provider>/<model>");
   assert.deepEqual(session.getState(), state);
 });
@@ -83,7 +83,7 @@ test("/model offers every provider's models, listed afresh each time", async () 
 });
 
 test("/new and /clear show a new session next to the old one, with config defaults, and later turns go to it", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "phi-"));
+  const dir = await mkdtemp(join(tmpdir(), "hortus-"));
   const old = await openSession(null, dir);
   await old.setModel("m1");
   await old.append([{ role: "user", content: "old" }]);
@@ -107,7 +107,7 @@ test("/new and /clear show a new session next to the old one, with config defaul
 });
 
 test("/resume shows another session next to the shown one at its last entry, the latest by default", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "phi-"));
+  const dir = await mkdtemp(join(tmpdir(), "hortus-"));
   const shown = await openSession(null, dir);
   const cli = await createCli(shown, async () => ({ plugins: [], resolve, run: async () => {} }) as unknown as Agent);
   assert.equal(await send(cli, "/resume"), "error: No sessions to resume");
@@ -134,7 +134,7 @@ test("/resume shows another session next to the shown one at its last entry, the
 });
 
 test("plugin commands run with their argument and replace built-ins by name; unknown names stay in the prompt", async () => {
-  const session = await openSession(null, await mkdtemp(join(tmpdir(), "phi-")));
+  const session = await openSession(null, await mkdtemp(join(tmpdir(), "hortus-")));
   const commands: Command[] = [
     {
       name: "echo",
@@ -167,7 +167,7 @@ test("plugin commands run with their argument and replace built-ins by name; unk
 });
 
 test("a command can start a turn, and the session isn't swapped while one runs", async () => {
-  const session = await openSession(null, await mkdtemp(join(tmpdir(), "phi-")));
+  const session = await openSession(null, await mkdtemp(join(tmpdir(), "hortus-")));
   const commands: Command[] = [{ name: "review", description: "", run: (_, cli) => void cli.submit("review this") }];
   const plugins = [{ cli: { commands } }];
   const cli = await createCli(session, async () => ({ plugins, resolve, run: () => sleep(40) }) as unknown as Agent);

@@ -3,7 +3,7 @@ import { anthropicProvider } from "./providers/anthropic.ts";
 import { openaiProvider } from "./providers/openai.ts";
 import { bashTool, editTool, readTool, writeTool } from "./tools.ts";
 
-/** Providers, tools and the base system prompt that ship with phi; loaded before any configured plugin. */
+/** Providers, tools and the base system prompt that ship with hortus; loaded before any configured plugin. */
 export const builtin: Plugin = {
   on: {
     session_start: ({ system }) => {

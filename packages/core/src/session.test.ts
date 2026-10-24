@@ -54,7 +54,7 @@ test("branch restores model and provider together from the model line", () => {
 });
 
 test("session changes reach subscribers with the previous state, and the file replays to the same state", async () => {
-  const session = await openSession(null, await mkdtemp(join(tmpdir(), "phi-")));
+  const session = await openSession(null, await mkdtemp(join(tmpdir(), "hortus-")));
   const seen: [SessionState, SessionState][] = [];
   session.subscribe((state, prev) => void seen.push([state, prev]));
   await session.setModel("m");
@@ -78,7 +78,7 @@ test("session changes reach subscribers with the previous state, and the file re
 });
 
 test("listSessions lists non-empty sessions newest first, titled by the first user message, resumable at the leaf", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "phi-"));
+  const dir = await mkdtemp(join(tmpdir(), "hortus-"));
   const a = await openSession(null, dir);
   await a.setModel("m");
   await a.append([

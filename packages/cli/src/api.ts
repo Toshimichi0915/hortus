@@ -1,10 +1,10 @@
-import type { Plugin, SessionState } from "@phi/core";
+import type { Plugin, SessionState } from "@hortus/core";
 import { type ComponentType, createContext, useContext } from "react";
 import { useStore } from "zustand";
 import type { Cli, UiState } from "./cli.ts";
 import type { Command } from "./commands.ts";
 
-export type { SessionState } from "@phi/core";
+export type { SessionState } from "@hortus/core";
 export { useShallow } from "zustand/react/shallow";
 export type { Cli, UiState } from "./cli.ts";
 export type { Candidate, Command } from "./commands.ts";
@@ -15,7 +15,7 @@ export interface Slots {
   statusBar: ComponentType;
 }
 
-/** Default export of a plugin whose phi.json depends on "@phi/cli". */
+/** Default export of a plugin whose hortus.json depends on "@hortus/cli". */
 export interface CliPlugin extends Plugin {
   /** each slot override gets the implementation it replaces as `Default`: the built-in one or an earlier plugin's */
   cli?: { [K in keyof Slots]?: ComponentType<{ Default: Slots[K] }> } & {
@@ -28,7 +28,7 @@ export const CliContext = createContext<Cli | undefined>(undefined);
 
 function useCli() {
   const cli = useContext(CliContext);
-  if (!cli) throw new Error("phi's hooks only work inside its TUI");
+  if (!cli) throw new Error("hortus's hooks only work inside its TUI");
   return cli;
 }
 

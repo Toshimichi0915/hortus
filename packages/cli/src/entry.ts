@@ -1,4 +1,4 @@
-import type { Message, ToolCall, ToolResult } from "@phi/core";
+import type { Message, ToolCall, ToolResult } from "@hortus/core";
 
 export interface Entry {
   id: number;
