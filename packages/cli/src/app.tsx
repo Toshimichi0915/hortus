@@ -1,7 +1,7 @@
-import { type Agent, createAgent, type Message, type Session } from "@phi/core";
+import { type Agent, createAgent, type Message, type Session, type ToolCall } from "@phi/core";
 import { Box, type BoxProps, type DOMElement, Text, useApp, useBoxMetrics, useInput, useWindowSize } from "ink";
 import { type ReactNode, useRef, useState } from "react";
-import { type Entry, entry } from "./entry.ts";
+import { type Entry, entry, formatTool } from "./entry.ts";
 import { PromptInput } from "./prompt-input.tsx";
 import { Transcript } from "./transcript.tsx";
 
@@ -66,6 +66,8 @@ export function App({ session, providers }: { session: Session; providers: strin
     setLive({ thinking: "", text: "" });
   };
   const agent = useRef<Promise<Agent>>(null);
+  // pending tool blocks by call id, restyled in place when their result arrives
+  const calls = useRef(new Map<string, { call: ToolCall; entry: Entry }>());
 
   async function submit(value: string) {
     if (!value.trim() || busy) return;
@@ -102,8 +104,23 @@ export function App({ session, providers }: { session: Session; providers: strin
             cur.current.text += delta;
             setLive({ ...cur.current });
           },
-          tool_call: (call) => push(entry("tool", `[${call.name}] ${JSON.stringify(call.input)}`)),
+          tool_call: (call) => {
+            const e = entry("tool", formatTool(call));
+            calls.current.set(call.id, { call, entry: e });
+            push(e);
+          },
           message: (message) => {
+            if (message.role === "tool") {
+              for (const r of message.results) {
+                const c = calls.current.get(r.id);
+                if (!c) continue;
+                // mutated, not replaced, so the exit transcript sees the result too
+                c.entry.kind = r.isError ? "toolError" : "toolOk";
+                c.entry.text = formatTool(c.call, r);
+                calls.current.delete(r.id);
+              }
+              setEntries((prev) => [...prev]);
+            }
             // an assistant message closes the streamed thinking and text
             flush();
             cur.current.turn.push(message);

@@ -5,7 +5,7 @@ import stringWidth from "string-width";
 import { type Entry, styles } from "./entry.ts";
 
 /** One screen row. `cont` = soft-wrapped continuation of the previous row (joined without a newline on copy). */
-export type Row = { kind: Entry["kind"]; text: string; cont: boolean };
+export type Row = { kind: Entry["kind"]; text: string; cont: boolean; bold?: boolean };
 type Point = { row: number; col: number };
 
 const graphemes = (s: string) => Array.from(new Intl.Segmenter().segment(s), (g) => g.segment);
@@ -37,11 +37,15 @@ export function wrap(line: string, width: number): string[] {
 export function toRows(entries: Entry[], width: number): Row[] {
   const rows: Row[] = [];
   for (const e of entries) {
-    if (e.kind === "user") rows.push({ kind: "info", text: "", cont: false });
-    for (const line of `${styles[e.kind].prefix ?? ""}${e.text}`.split("\n"))
+    const block = !!styles[e.kind].backgroundColor;
+    if (e.kind === "user" || block) rows.push({ kind: "info", text: "", cont: false });
+    // a block's header is its first non-blank line
+    const head = block ? e.text.split("\n").findIndex(Boolean) : -1;
+    `${styles[e.kind].prefix ?? ""}${e.text}`.split("\n").forEach((line, l) => {
       wrap(line, Math.max(1, width)).forEach((text, i) => {
-        rows.push({ kind: e.kind, text, cont: i > 0 });
+        rows.push({ kind: e.kind, text, cont: i > 0, bold: l === head });
       });
+    });
   }
   return rows;
 }
@@ -170,9 +174,11 @@ export function Transcript({
       {rows.slice(top, top + height).map((row, i) => {
         const { prefix: _, ...style } = styles[row.kind];
         const cols = selectedCols(sel, top + i);
+        // fill the rest of the row so a block's background spans the pane
+        const fill = style.backgroundColor ? " ".repeat(Math.max(0, width - stringWidth(row.text))) : "";
         return (
           // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional
-          <Text key={i} wrap="truncate" {...style}>
+          <Text key={i} wrap="truncate" bold={row.bold} {...style}>
             {cols ? (
               <>
                 {sliceCols(row.text, 0, cols[0])}
@@ -182,6 +188,7 @@ export function Transcript({
             ) : (
               row.text || " "
             )}
+            {fill}
           </Text>
         );
       })}
