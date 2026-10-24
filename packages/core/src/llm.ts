@@ -28,8 +28,12 @@ export const tool = <S extends z.ZodObject>(t: {
 export type CompletionRequest = { model: string; system: string; messages: Message[]; tools: Tool[] };
 
 export interface Provider {
-  /** Streams one assistant turn, calling onText for each text delta. */
-  complete(req: CompletionRequest, onText: (text: string) => void): Promise<AssistantMessage>;
+  /** Streams one assistant turn, calling onText / onThinking for each text / reasoning delta. */
+  complete(
+    req: CompletionRequest,
+    onText: (text: string) => void,
+    onThinking: (text: string) => void,
+  ): Promise<AssistantMessage>;
   /** Model ids usable as CompletionRequest.model. */
   listModels(): Promise<string[]>;
 }
@@ -42,6 +46,8 @@ export type Events = {
   session_start: { system: string[] };
   /** streamed assistant text delta */
   text: string;
+  /** streamed reasoning delta, when the provider exposes it */
+  thinking: string;
   tool_call: ToolCall;
   /** a new message to append to the history */
   message: Message;

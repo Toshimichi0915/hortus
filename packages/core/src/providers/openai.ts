@@ -34,7 +34,11 @@ export function openaiProvider(options?: ConstructorParameters<typeof OpenAI>[0]
       for await (const m of client.models.list()) ids.push(m.id);
       return ids;
     },
-    async complete({ model, system, messages, tools }: CompletionRequest, onText): Promise<AssistantMessage> {
+    async complete(
+      { model, system, messages, tools }: CompletionRequest,
+      onText,
+      onThinking,
+    ): Promise<AssistantMessage> {
       const stream = client.chat.completions.stream({
         model,
         messages: [{ role: "system", content: system }, ...messages.flatMap(toOpenAI)],
@@ -44,8 +48,11 @@ export function openaiProvider(options?: ConstructorParameters<typeof OpenAI>[0]
         })),
       });
       for await (const chunk of stream) {
-        const text = chunk.choices[0]?.delta?.content;
-        if (text) onText(text);
+        const delta = chunk.choices[0]?.delta;
+        // `reasoning` is OpenRouter's extension; plain OpenAI chat completions doesn't stream reasoning
+        const reasoning = (delta as { reasoning?: string } | undefined)?.reasoning;
+        if (reasoning) onThinking(reasoning);
+        if (delta?.content) onText(delta.content);
       }
       const message = (await stream.finalChatCompletion()).choices[0]?.message;
       return {

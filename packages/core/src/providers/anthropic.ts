@@ -48,10 +48,16 @@ export function anthropicProvider(options?: ConstructorParameters<typeof Anthrop
       for await (const m of client.models.list()) ids.push(m.id);
       return ids;
     },
-    async complete({ model, system, messages, tools }: CompletionRequest, onText): Promise<AssistantMessage> {
+    async complete(
+      { model, system, messages, tools }: CompletionRequest,
+      onText,
+      onThinking,
+    ): Promise<AssistantMessage> {
       const stream = client.messages.stream({
         model,
         max_tokens: 64000,
+        // ponytail: adaptive only, pre-4.6 models (e.g. Haiku 4.5) reject it; pick per model if they matter
+        thinking: { type: "adaptive", display: "summarized" },
         system,
         messages: messages.flatMap(toAnthropic),
         tools: tools.map((t) => ({
@@ -61,7 +67,9 @@ export function anthropicProvider(options?: ConstructorParameters<typeof Anthrop
         })),
       });
       for await (const event of stream) {
-        if (event.type === "content_block_delta" && event.delta.type === "text_delta") onText(event.delta.text);
+        if (event.type !== "content_block_delta") continue;
+        if (event.delta.type === "text_delta") onText(event.delta.text);
+        else if (event.delta.type === "thinking_delta") onThinking(event.delta.thinking);
       }
       const message = await stream.finalMessage();
       const toolCalls = message.content.flatMap((b) =>

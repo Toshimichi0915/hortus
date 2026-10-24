@@ -59,7 +59,11 @@ export async function createAgent(plugin?: Plugin) {
     const system = start.system.join("\n\n");
     const messages = [...history];
     for (let step = 0; step < maxSteps; step++) {
-      const assistant = await provider.complete({ model, system, messages, tools }, (text) => void emit("text", text));
+      const assistant = await provider.complete(
+        { model, system, messages, tools },
+        (text) => void emit("text", text),
+        (text) => void emit("thinking", text),
+      );
       messages.push(assistant);
       await emit("message", assistant);
       if (!assistant.toolCalls.length) return;

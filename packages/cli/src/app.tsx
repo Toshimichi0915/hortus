@@ -36,7 +36,7 @@ export function App({ session, providers }: { session: Session; providers: strin
       `Session: ${session.path} (${session.messages.length} messages)${session.provider ? ` · provider: ${session.provider}` : ""}${session.model ? ` · model: ${session.model}` : ""}`,
     ),
   ]);
-  const [live, setLive] = useState("");
+  const [live, setLive] = useState({ thinking: "", text: "" });
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   // rows the input is scrolled up from its end; clamped on read by ScrollBox, so overshoot just sticks at the top
@@ -57,7 +57,14 @@ export function App({ session, providers }: { session: Session; providers: strin
 
   const push = (...e: Entry[]) => setEntries((prev) => [...prev, ...e]);
   // the agent outlives a turn, so its handlers write to the current turn through a ref
-  const cur = useRef({ text: "", turn: [] as Message[] });
+  const cur = useRef({ thinking: "", text: "", turn: [] as Message[] });
+  // streamed-but-unfinished thinking and text become entries, then the live view resets
+  const flush = () => {
+    const { thinking, text } = cur.current;
+    push(...(thinking ? [entry("thinking", thinking)] : []), ...(text ? [entry("assistant", text)] : []));
+    cur.current.thinking = cur.current.text = "";
+    setLive({ thinking: "", text: "" });
+  };
   const agent = useRef<Promise<Agent>>(null);
 
   async function submit(value: string) {
@@ -82,21 +89,23 @@ export function App({ session, providers }: { session: Session; providers: strin
     setBusy(true);
     push(entry("user", value));
     const turn: Message[] = [{ role: "user", content: value }];
-    cur.current = { text: "", turn };
+    cur.current = { thinking: "", text: "", turn };
     try {
       // created on first submit so a plugin load error is reported like any other
       agent.current ??= createAgent({
         on: {
+          thinking: (delta) => {
+            cur.current.thinking += delta;
+            setLive({ ...cur.current });
+          },
           text: (delta) => {
             cur.current.text += delta;
-            setLive(cur.current.text);
+            setLive({ ...cur.current });
           },
           tool_call: (call) => push(entry("tool", `[${call.name}] ${JSON.stringify(call.input)}`)),
           message: (message) => {
-            // an assistant message closes the streamed text
-            if (message.role === "assistant" && cur.current.text) push(entry("assistant", cur.current.text));
-            cur.current.text = "";
-            setLive("");
+            // an assistant message closes the streamed thinking and text
+            flush();
             cur.current.turn.push(message);
           },
         },
@@ -108,8 +117,7 @@ export function App({ session, providers }: { session: Session; providers: strin
       session.messages.push(...turn);
       await session.append(turn);
     } catch (e) {
-      if (cur.current.text) push(entry("assistant", cur.current.text));
-      setLive("");
+      flush();
       push(entry("error", e instanceof Error ? e.message : String(e)));
     }
     setBusy(false);
@@ -131,7 +139,11 @@ export function App({ session, providers }: { session: Session; providers: strin
   return (
     <Box flexDirection="column" height={rows}>
       <Transcript
-        entries={live ? [...entries, { id: -1, kind: "assistant", text: live }] : entries}
+        entries={[
+          ...entries,
+          ...(live.thinking ? [{ id: -2, kind: "thinking" as const, text: live.thinking }] : []),
+          ...(live.text ? [{ id: -1, kind: "assistant" as const, text: live.text }] : []),
+        ]}
         onWheelBelow={(delta) => setInScroll((n) => clamp(n + delta))}
         onCopy={setCopied}
       />
