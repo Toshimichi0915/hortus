@@ -19,21 +19,34 @@ export function entry(kind: Entry["kind"], text: string): Entry {
 interface Style {
   color?: string;
   backgroundColor?: string;
-  dimColor?: boolean;
   italic?: boolean;
-  prefix?: string;
 }
 
+/** pi's dark theme: the okhsl() colors of its dark.json, as hex. */
+export const theme = {
+  text: "#dee0e1",
+  muted: "#9da5a9",
+  dim: "#7e888e",
+  accent: "#a798d7",
+  border: "#5fa8cc",
+  borderIdle: "#6c767b",
+  green: "#68b78d",
+  red: "#ea7f81",
+  yellow: "#cd9a22",
+  blue: "#69add0",
+  thinking: "#96a0a4",
+};
+
 export const styles: Record<Entry["kind"], Style> = {
-  info: { dimColor: true },
-  user: { color: "cyan", prefix: "> " },
-  thinking: { dimColor: true, italic: true },
+  info: { color: theme.dim },
+  user: { color: theme.text, backgroundColor: "#213b49" },
+  thinking: { color: theme.thinking, italic: true },
   assistant: {},
-  // pending / success / error tool blocks, a bit brighter than pi's dark theme
-  tool: { backgroundColor: "#30304a" },
-  toolOk: { backgroundColor: "#1f4a2a" },
-  toolError: { backgroundColor: "#5a2424" },
-  error: { color: "red" },
+  // pending / success / error tool blocks
+  tool: { backgroundColor: "#34383a" },
+  toolOk: { backgroundColor: "#254131" },
+  toolError: { backgroundColor: "#5b282a" },
+  error: { color: theme.red },
 };
 
 /** Keeps the first (or last) `n` lines, noting how many were cut. */

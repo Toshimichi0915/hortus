@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { formatTool, theme } from "./entry.ts";
 import { selectionText, toRows, wrap } from "./transcript.tsx";
 
 test("wrap keeps every character and respects width, including wide chars", () => {
@@ -38,5 +39,21 @@ test("styled spans are split across wrapped rows", () => {
   assert.deepEqual(
     rows.map((r) => r.spans),
     [[{ bold: true, text: "aaa " }], [{ bold: true, text: "bbb" }, { text: " ccc" }]],
+  );
+});
+
+test("edit blocks color removed lines red and added lines green", () => {
+  const call = { id: "1", name: "edit", input: { path: "a", edits: [{ oldText: "x", newText: "y" }] } };
+  const rows = toRows([{ id: 0, kind: "toolOk", text: formatTool(call) }], 20);
+  assert.deepEqual(
+    rows.map((r) => [r.text, r.spans[0]?.color]),
+    [
+      ["", undefined],
+      ["edit a", theme.text],
+      ["", undefined],
+      ["- x", theme.red],
+      ["+ y", theme.green],
+      ["", undefined],
+    ],
   );
 });

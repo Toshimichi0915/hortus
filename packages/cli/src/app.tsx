@@ -1,7 +1,7 @@
 import { type Agent, createAgent, type Message, type Session, type ToolCall } from "@phi/core";
 import { Box, type BoxProps, type DOMElement, Text, useApp, useBoxMetrics, useInput, useWindowSize } from "ink";
 import { type ReactNode, useRef, useState } from "react";
-import { type Entry, entry, formatTool } from "./entry.ts";
+import { type Entry, entry, formatTool, theme } from "./entry.ts";
 import { PromptInput } from "./prompt-input.tsx";
 import { Transcript } from "./transcript.tsx";
 
@@ -91,7 +91,8 @@ export function App({ session, providers }: { session: Session; providers: strin
       return push(entry("info", `Provider set to ${pcmd[1]}`));
     }
     setBusy(true);
-    push(entry("user", value));
+    // blank rows pad the message's background, as pi does
+    push(entry("user", `\n${value}\n`));
     const turn: Message[] = [{ role: "user", content: value }];
     cur.current = { thinking: "", text: "", turn };
     const abort = new AbortController();
@@ -152,8 +153,14 @@ export function App({ session, providers }: { session: Session; providers: strin
   }
 
   const prompt = (
-    <Box flexShrink={0} marginTop={1} borderStyle="round" borderColor={busy ? "gray" : "cyan"} paddingX={1}>
-      <Text color="cyan">{"> "}</Text>
+    <Box
+      flexShrink={0}
+      marginTop={1}
+      borderStyle="round"
+      borderColor={busy ? theme.borderIdle : theme.border}
+      paddingX={1}
+    >
+      <Text color={theme.accent}>{"> "}</Text>
       <ScrollBox flexGrow={1} maxHeight={8} fromBottom={inScroll}>
         <PromptInput value={input} onChange={setInput} onSubmit={submit} />
       </ScrollBox>
@@ -172,7 +179,7 @@ export function App({ session, providers }: { session: Session; providers: strin
         onCopy={setCopied}
       />
       {prompt}
-      <Text dimColor wrap="truncate">
+      <Text color={theme.dim} wrap="truncate">
         {copied === undefined
           ? "Wheel/PgUp/PgDn scroll · ↑/↓ input · Shift+Enter newline · Esc interrupt · Ctrl+C clear · Ctrl+D quit"
           : `Copied ${copied} chars`}

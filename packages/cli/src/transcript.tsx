@@ -2,7 +2,7 @@ import { stdout } from "node:process";
 import { Box, type DOMElement, Text, useBoxMetrics, useInput, useStdin } from "ink";
 import { useEffect, useMemo, useRef, useState } from "react";
 import stringWidth from "string-width";
-import { type Entry, styles } from "./entry.ts";
+import { type Entry, styles, theme } from "./entry.ts";
 import { markdown, type Span } from "./markdown.ts";
 
 /**
@@ -50,14 +50,27 @@ export function wrap(line: string, width: number): string[] {
 export function toRows(entries: Entry[], width: number): Row[] {
   const rows: Row[] = [];
   for (const e of entries) {
-    const block = !!styles[e.kind].backgroundColor;
+    const block = e.kind.startsWith("tool");
     // a blank row between user input, thinking, output and tool blocks
     if (rows.length && e.kind !== "info" && e.kind !== "error")
       rows.push({ kind: "info", text: "", spans: [], cont: false });
     // a block's header is its first non-blank line
-    const head = block ? e.text.split("\n").findIndex(Boolean) : -1;
-    const text = `${styles[e.kind].prefix ?? ""}${e.text}`;
-    const lines = e.kind === "assistant" ? markdown(text, width) : text.split("\n").map((t) => [{ text: t }]);
+    const split = e.text.split("\n");
+    const head = block ? split.findIndex(Boolean) : -1;
+    // ponytail: spots edit diffs by the header formatTool writes; carry the tool name on Entry if that gets ambiguous
+    const diff = block && split[head]?.startsWith("edit ");
+    const color = (t: string, l: number) =>
+      l === head
+        ? theme.text
+        : diff && t.startsWith("+ ")
+          ? theme.green
+          : diff && t.startsWith("- ")
+            ? theme.red
+            : theme.muted;
+    const lines =
+      e.kind === "assistant"
+        ? markdown(e.text, width)
+        : split.map((t, l) => [{ text: t, color: block ? color(t, l) : undefined }]);
     lines.forEach((spans, l) => {
       let col = 0;
       wrap(spans.map((s) => s.text).join(""), Math.max(1, width)).forEach((text, i) => {
@@ -212,7 +225,7 @@ export function Transcript({
   return (
     <Box ref={pane} flexGrow={1} flexBasis={0} flexDirection="column" overflow="hidden">
       {rows.slice(top, top + height).map((row, i) => {
-        const { prefix: _, ...style } = styles[row.kind];
+        const style = styles[row.kind];
         const cols = selectedCols(sel, top + i);
         // fill the rest of the row so a block's background spans the pane
         const fill = style.backgroundColor ? " ".repeat(Math.max(0, width - stringWidth(row.text))) : "";

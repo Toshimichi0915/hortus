@@ -14,7 +14,7 @@ import {
 import { Argument, Command } from "commander";
 import { render } from "ink";
 import { App } from "./app.tsx";
-import { styles, transcript } from "./entry.ts";
+import { transcript } from "./entry.ts";
 
 async function promptHidden(question: string) {
   stdout.write(question);
@@ -43,8 +43,7 @@ const program = new Command("phi")
       kittyKeyboard: { mode: "auto" },
     }).waitUntilExit();
     // the alternate screen is gone on exit, so leave the conversation in normal scrollback
-    for (const e of transcript)
-      console.log(`${e.kind !== "info" && e.kind !== "error" ? "\n" : ""}${styles[e.kind].prefix ?? ""}${e.text}`);
+    for (const e of transcript) console.log(`${e.kind !== "info" && e.kind !== "error" ? "\n" : ""}${e.text}`);
   });
 
 const config = program

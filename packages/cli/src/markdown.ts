@@ -1,5 +1,6 @@
 import type { TextProps } from "ink";
 import stringWidth from "string-width";
+import { theme } from "./entry.ts";
 
 /** A run of text with one style; a rendered line is a list of these. */
 export interface Span
@@ -20,13 +21,13 @@ export function inline(text: string, style: Style = {}): Span[] {
     const [, , code, b1, b2, strike, i1, i2, label, url] = m;
     const bold = b1 ?? b2;
     const italic = i1 ?? i2;
-    if (code !== undefined) out.push({ ...style, color: "yellow", text: code });
+    if (code !== undefined) out.push({ ...style, color: theme.accent, text: code });
     else if (bold !== undefined) out.push(...inline(bold, { ...style, bold: true }));
     else if (strike !== undefined) out.push(...inline(strike, { ...style, strikethrough: true }));
     else if (italic !== undefined) out.push(...inline(italic, { ...style, italic: true }));
     else if (label !== undefined) {
-      out.push(...inline(label, { ...style, underline: true }));
-      if (url !== label) out.push({ ...style, dimColor: true, text: ` (${url})` });
+      out.push(...inline(label, { ...style, color: theme.blue, underline: true }));
+      if (url !== label) out.push({ ...style, color: theme.muted, text: ` (${url})` });
     }
     last = m.index + m[0].length;
   }
@@ -81,7 +82,7 @@ export function markdown(text: string, width: number): Span[][] {
   // the current paragraph, quote or list item: inline styles may cross its line breaks
   let group: { prefix: Span[]; text: string }[] = [];
   let kind: "para" | "quote" | "bullet" | undefined;
-  const flush = (style: Style = kind === "quote" ? { dimColor: true } : {}) => {
+  const flush = (style: Style = kind === "quote" ? { color: theme.muted } : {}) => {
     if (!group.length) return;
     const split: Span[][] = [[]];
     for (const s of inline(group.map((g) => g.text).join("\n"), style))
@@ -102,11 +103,11 @@ export function markdown(text: string, width: number): Span[][] {
     if (open && (!fence || open.startsWith(fence))) {
       flush();
       fence = fence ? undefined : open;
-      out.push([{ dimColor: true, text: line }]);
+      out.push([{ color: theme.muted, text: line }]);
       continue;
     }
     if (fence) {
-      out.push([{ color: "yellow", text: line }]);
+      out.push([{ color: theme.green, text: line }]);
       continue;
     }
     if (!line.trim()) {
@@ -116,14 +117,14 @@ export function markdown(text: string, width: number): Span[][] {
     }
     // setext heading: a paragraph underlined with === or ---
     if (kind === "para" && /^ {0,3}(=+|-+) *$/.test(line)) {
-      flush({ bold: true });
+      flush({ color: theme.yellow, bold: true });
       continue;
     }
     const heading = line.match(/^#{1,6}\s+(.*)$/);
     const next = lines[i + 1] ?? "";
     if (heading) {
       flush();
-      out.push(inline(heading[1] ?? "", { bold: true }));
+      out.push(inline(heading[1] ?? "", { color: theme.yellow, bold: true }));
     } else if (line.includes("|") && next.includes("|") && DELIM.test(next)) {
       flush();
       let end = i + 2;
@@ -132,18 +133,21 @@ export function markdown(text: string, width: number): Span[][] {
       i = end - 1;
     } else if (/^ {0,3}([-*_])( *\1){2,} *$/.test(line)) {
       flush();
-      out.push([{ dimColor: true, text: "─".repeat(width) }]);
+      out.push([{ color: theme.muted, text: "─".repeat(width) }]);
     } else {
       const quote = line.match(/^(\s*)>\s?(.*)$/);
       const bullet = line.match(/^(\s*)[-*+]\s+(.*)$/);
       if (quote) {
         if (kind !== "quote") flush();
         kind = "quote";
-        group.push({ prefix: [{ dimColor: true, text: `${quote[1]}│ ` }], text: quote[2] ?? "" });
+        group.push({ prefix: [{ color: theme.muted, text: `${quote[1]}│ ` }], text: quote[2] ?? "" });
       } else if (bullet) {
         flush();
         kind = "bullet";
-        group.push({ prefix: [{ text: `${bullet[1]}• ` }], text: bullet[2] ?? "" });
+        group.push({
+          prefix: [...(bullet[1] ? [{ text: bullet[1] }] : []), { color: theme.accent, text: "• " }],
+          text: bullet[2] ?? "",
+        });
       } else {
         // a plain line continues a paragraph or list item
         if (kind === "quote") flush();
