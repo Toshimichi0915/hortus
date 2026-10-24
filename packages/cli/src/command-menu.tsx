@@ -127,7 +127,7 @@ export function useCommandMenu(cli: Cli, input: string, setInput: (value: string
     const row = rows?.[at];
     const dir = key.upArrow ? -1 : key.downArrow ? 1 : 0;
     const enter = key.return && !key.shift && !key.meta;
-    if (!shown || !(dir || key.tab || enter) || (enter && (!row || row.value === input))) return false;
+    if (!shown || !(dir || (key.tab && !key.shift) || enter) || (enter && (!row || row.value === input))) return false;
     // from the latest selection: keys can come faster than renders (a held ↓)
     if (dir) setSel((v) => rows?.[Math.max(0, Math.min(indexOf(v) + dir, (rows?.length ?? 0) - 1))]?.value);
     // nothing to fill while loading

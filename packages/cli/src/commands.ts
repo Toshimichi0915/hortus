@@ -1,6 +1,6 @@
 import { dirname } from "node:path";
-import { listSessions, openSession } from "@hortus/core";
-import type { Cli } from "./cli.ts";
+import { EFFORTS, type Effort, listSessions, openSession } from "@hortus/core";
+import { type Cli, supports } from "./cli.ts";
 import { stamp } from "./entry.ts";
 
 /** One choice for a command's argument. */
@@ -40,7 +40,7 @@ export function parseCommand(input: string) {
 export const findCommand = (commands: Command[], name: string) =>
   commands.find((c) => c.name === name) ?? commands.find((c) => c.aliases?.includes(name));
 
-/** /new, /model and /resume. */
+/** /new, /model, /effort and /resume. */
 export const builtinCommands: Command[] = [
   {
     name: "new",
@@ -75,6 +75,26 @@ export const builtinCommands: Command[] = [
       await cli.agent.resolve({ provider, model });
       await session.setModel(model, provider);
       return `Model set to ${provider}/${model}`;
+    },
+  },
+  {
+    name: "effort",
+    aliases: ["thinking"],
+    args: "[level]",
+    description: "Set the thinking effort (shift+tab cycles it)",
+    // only the ones the model takes, when the API reports them
+    complete: (cli) => [
+      { value: "auto", description: "provider default" },
+      ...EFFORTS.filter((e) => supports(cli.ui.getState(), e)).map((value) => ({ value })),
+    ],
+    run: (arg, cli) => {
+      if (!arg) return `Effort: ${cli.ui.getState().effort ?? "auto"}`;
+      if (arg !== "auto" && !EFFORTS.includes(arg as Effort))
+        throw new Error(`Usage: /effort <auto|${EFFORTS.join("|")}>`);
+      if (arg !== "auto" && !supports(cli.ui.getState(), arg as Effort))
+        throw new Error(`${cli.ui.getState().status?.model} doesn't support effort ${arg}`);
+      cli.setEffort(arg === "auto" ? undefined : (arg as Effort));
+      return `Effort set to ${arg}`;
     },
   },
   {

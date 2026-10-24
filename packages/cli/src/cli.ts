@@ -1,4 +1,14 @@
-import type { Agent, Message, Plugin, Session, ToolCall } from "@hortus/core";
+import {
+  type Agent,
+  EFFORTS,
+  type Effort,
+  loadConfig,
+  type Message,
+  type Plugin,
+  saveConfig,
+  type Session,
+  type ToolCall,
+} from "@hortus/core";
 import { createStore } from "zustand/vanilla";
 import type { CliPlugin } from "./api.ts";
 import { builtinCommands, type Command, findCommand, parseCommand } from "./commands.ts";
@@ -14,11 +24,19 @@ export interface UiState {
   /** messages of the running turn; appended to the session when the run ends */
   turn: Message[];
   busy: boolean;
-  /** provider name and model the next run would use, plus the context window when the API reports it */
-  status?: { name: string; model: string; window?: number };
+  /** effort of the next run; undefined = the provider's default */
+  effort?: Effort;
+  /** provider name and model the next run would use, plus its context window and efforts when the API reports them */
+  status?: { name: string; model: string; window?: number; efforts?: Effort[] };
   /** chars of the last copy, shown until the next submit */
   copied?: number;
 }
+
+/** Whether the shown model takes `effort`; true while unknown (still loading, or not reported by the API). */
+export const supports = (s: UiState, effort: Effort) => s.status?.efforts?.includes(effort) ?? true;
+
+/** The effort runs use: the one set, unless the model doesn't take it (kept from another model) and would reject it. */
+export const runEffort = (s: UiState) => (s.effort && supports(s, s.effort) ? s.effort : undefined);
 
 /** Transcript entries for messages already in the session, so a resumed one shows as it was left. */
 export function replay(messages: Message[]): Entry[] {
@@ -64,7 +82,11 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
  * with the run observer it's given.
  */
 export async function createCli(session: Session, makeAgent: (observer: Plugin) => Promise<Agent>) {
-  const ui = createStore<UiState>()(() => ({ ...show(session), busy: false }));
+  const ui = createStore<UiState>()(() => ({ ...show(session), busy: false, effort: undefined }));
+  void loadConfig().then(
+    ({ effort }) => ui.setState({ effort }),
+    () => {},
+  );
   const push = (...e: Entry[]) => ui.setState((s) => ({ entries: [...s.entries, ...e] }));
   // Deltas reach `live` at most once a frame: every store change renders synchronously (useSyncExternalStore), and a
   // fast stream of back-to-back sync renders trips React's nested-update limit while Ink's useBoxMetrics has updates
@@ -151,8 +173,11 @@ export async function createCli(session: Session, makeAgent: (observer: Plugin) 
       // a newer change won; don't overwrite it with a stale result
       if (n !== seq) return;
       ui.setState({ status: { name: r.name, model: r.model } });
-      const window = await r.provider.contextWindow?.(r.model).catch(() => undefined);
-      if (n === seq) ui.setState({ status: { name: r.name, model: r.model, window } });
+      const [window, efforts] = await Promise.all([
+        r.provider.contextWindow?.(r.model).catch(() => undefined),
+        r.provider.efforts?.(r.model).catch(() => undefined),
+      ]);
+      if (n === seq) ui.setState({ status: { name: r.name, model: r.model, window, efforts } });
     } catch {
       if (n === seq) ui.setState({ status: undefined });
     }
@@ -180,9 +205,11 @@ export async function createCli(session: Session, makeAgent: (observer: Plugin) 
     aborter = abort;
     try {
       const { messages, model, provider } = session.getState();
-      await agent.run([...messages, ...turn], { model, provider, signal: abort.signal }).catch((e) => {
-        if (!abort.signal.aborted) throw e;
-      });
+      await agent
+        .run([...messages, ...turn], { model, provider, effort: runEffort(ui.getState()), signal: abort.signal })
+        .catch((e) => {
+          if (!abort.signal.aborted) throw e;
+        });
       if (abort.signal.aborted) {
         // the partial reply stays on screen but not in history; completed messages are kept
         flush();
@@ -210,6 +237,15 @@ export async function createCli(session: Session, makeAgent: (observer: Plugin) 
     }
   }
 
+  // saves run one after another, so the last effort set is the one left in config.json
+  let saving = Promise.resolve();
+  const setEffort = (effort: Effort | undefined) => {
+    ui.setState({ effort });
+    saving = saving
+      .then(async () => saveConfig({ ...(await loadConfig()), effort }))
+      .catch((e) => push(entry("error", `Couldn't save effort: ${errorText(e)}`)));
+  };
+
   const cli = {
     ui,
     agent,
@@ -236,6 +272,18 @@ export async function createCli(session: Session, makeAgent: (observer: Plugin) 
       return true;
     },
     abort: () => aborter?.abort(),
+    /** sets the effort of the next runs (undefined = provider default) and saves it to config.json */
+    setEffort,
+    /** next effort the model takes after the set one: default, then EFFORTS in order, then default again */
+    cycleEffort: () => {
+      const s = ui.getState();
+      const all = [undefined, ...EFFORTS];
+      const at = all.indexOf(s.effort);
+      for (let i = 1; i <= all.length; i++) {
+        const next = all[(at + i) % all.length];
+        if (!next || supports(s, next)) return setEffort(next);
+      }
+    },
     setCopied: (chars: number) => ui.setState({ copied: chars }),
     /** adds an error entry to the transcript */
     report: (text: string) => push(entry("error", text)),

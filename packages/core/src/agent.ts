@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.ts";
-import type { Image, Message, Tool, ToolCall, ToolResult } from "./llm.ts";
+import type { Effort, Image, Message, Tool, ToolCall, ToolResult } from "./llm.ts";
 import { type LoadOptions, loadPlugins } from "./plugins.ts";
 import { loadSecrets } from "./secrets.ts";
 
@@ -22,6 +22,8 @@ async function runTool(tools: Tool[], call: ToolCall): Promise<ToolResult> {
 export interface RunOptions {
   model?: string;
   provider?: string;
+  /** passed as is, not defaulted from config: unset means the provider's default */
+  effort?: Effort;
   /** stops the run: the current stream rejects, running tools finish and their results are kept */
   signal?: AbortSignal;
 }
@@ -73,7 +75,7 @@ export async function createAgent(opts?: LoadOptions) {
     for (let step = 0; step < maxSteps; step++) {
       if (opts.signal?.aborted) return;
       const assistant = await provider.complete(
-        { model, system, messages, tools, signal: opts.signal },
+        { model, system, messages, tools, effort: opts.effort, signal: opts.signal },
         (text) => void emit("text", text),
         (text) => void emit("thinking", text),
       );

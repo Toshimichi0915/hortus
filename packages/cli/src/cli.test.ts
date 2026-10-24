@@ -5,14 +5,16 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type Agent, openSession, type Plugin } from "@hortus/core";
-import { createCli } from "./cli.ts";
+import { createCli, runEffort, type UiState } from "./cli.ts";
 
 test("status follows the session's model and provider, and a stale resolve doesn't overwrite a newer one", async () => {
   const session = await openSession(null, await mkdtemp(join(tmpdir(), "hortus-")));
   const resolve = async ({ model = "m0", provider = "p0" }: { model?: string; provider?: string }) => {
     // resolving "slow" finishes after a later change to "fast"
     if (model === "slow") await sleep(50);
-    return { name: provider, model, provider: { contextWindow: async () => 1000 } };
+    // m1 reports its efforts, the others don't
+    const efforts = async (m: string) => (m === "m1" ? ["off", "high"] : undefined);
+    return { name: provider, model, provider: { contextWindow: async () => 1000, efforts } };
   };
   const agent = { plugins: [], resolve, run: async () => {} } as unknown as Agent;
   const cli = await createCli(session, async () => agent);
@@ -20,15 +22,15 @@ test("status follows the session's model and provider, and a stale resolve doesn
     await sleep(10);
     return cli.ui.getState().status;
   };
-  assert.deepEqual(await status(), { name: "p0", model: "m0", window: 1000 });
+  assert.deepEqual(await status(), { name: "p0", model: "m0", window: 1000, efforts: undefined });
   await session.setModel("m1");
-  assert.deepEqual(await status(), { name: "p0", model: "m1", window: 1000 });
+  assert.deepEqual(await status(), { name: "p0", model: "m1", window: 1000, efforts: ["off", "high"] });
   await session.setProvider("p1");
-  assert.deepEqual(await status(), { name: "p1", model: "m1", window: 1000 });
+  assert.deepEqual(await status(), { name: "p1", model: "m1", window: 1000, efforts: ["off", "high"] });
   await session.setModel("slow");
   await session.setModel("fast");
   await sleep(80);
-  assert.deepEqual(cli.ui.getState().status, { name: "p1", model: "fast", window: 1000 });
+  assert.deepEqual(cli.ui.getState().status, { name: "p1", model: "fast", window: 1000, efforts: undefined });
 });
 
 test("streamed deltas reach the store once a frame, and none are lost when the reply ends", async () => {
@@ -54,4 +56,13 @@ test("streamed deltas reach the store once a frame, and none are lost when the r
   await sleep(100);
   assert.deepEqual(lives, ["abc", ""]);
   assert.equal(cli.ui.getState().entries.at(-1)?.text, "abcd");
+});
+
+test("runs use the set effort only if the model takes it, or while its efforts are unknown", () => {
+  const state = (effort: UiState["effort"], efforts?: UiState["effort"][]) =>
+    ({ effort, status: { name: "p", model: "m", efforts } }) as UiState;
+  assert.equal(runEffort(state("max")), "max");
+  assert.equal(runEffort(state("max", ["off", "high"])), undefined);
+  assert.equal(runEffort(state("high", ["off", "high"])), "high");
+  assert.equal(runEffort(state(undefined, ["off", "high"])), undefined);
 });

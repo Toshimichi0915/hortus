@@ -54,7 +54,7 @@ export function openaiProvider(options?: ConstructorParameters<typeof OpenAI>[0]
         if (m.id === model) return (m as { context_length?: number }).context_length;
     },
     async complete(
-      { model, system, messages, tools, signal }: CompletionRequest,
+      { model, system, messages, tools, effort, signal }: CompletionRequest,
       onText,
       onThinking,
     ): Promise<AssistantMessage> {
@@ -67,6 +67,8 @@ export function openaiProvider(options?: ConstructorParameters<typeof OpenAI>[0]
             function: { name: t.name, description: t.description, parameters: z.toJSONSchema(t.inputSchema) },
           })),
           stream_options: { include_usage: true },
+          // only when set: non-reasoning models reject the parameter
+          ...(effort && { reasoning_effort: effort === "off" ? "none" : effort }),
         },
         { signal },
       );

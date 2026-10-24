@@ -53,11 +53,16 @@ export const tool = <S extends z.ZodObject>(t: {
   execute: (input: z.infer<S>) => Promise<unknown>;
 }): Tool => t;
 
+/** Thinking effort; "off" disables thinking. Unset means the provider's default. */
+export const EFFORTS = ["off", "low", "medium", "high", "xhigh", "max"] as const;
+export type Effort = (typeof EFFORTS)[number];
+
 export interface CompletionRequest {
   model: string;
   system: string;
   messages: Message[];
   tools: Tool[];
+  effort?: Effort;
   /** aborts the stream; the provider rejects */
   signal?: AbortSignal;
 }
@@ -73,6 +78,8 @@ export interface Provider {
   listModels(): Promise<string[]>;
   /** Input context window of `model` in tokens, when the API reports it. */
   contextWindow?(model: string): Promise<number | undefined>;
+  /** Efforts `model` accepts, when the API reports them; otherwise every one is offered. */
+  efforts?(model: string): Promise<Effort[] | undefined>;
 }
 
 export interface ProviderDef {

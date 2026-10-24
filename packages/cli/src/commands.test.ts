@@ -157,7 +157,7 @@ test("plugin commands run with their argument and replace built-ins by name; unk
   const cli = await createCli(session, async () => ({ plugins, resolve }) as unknown as Agent);
   assert.deepEqual(
     cli.commands.map((c) => c.name),
-    ["new", "model", "resume", "echo", "fail"],
+    ["new", "model", "effort", "resume", "echo", "fail"],
   );
   assert.equal(await send(cli, "/echo  a b"), "info: echo a b");
   assert.equal(await send(cli, "/fail"), "error: boom");

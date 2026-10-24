@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import type { AssistantMessage, CompletionRequest, Message, Provider } from "../llm.ts";
+import { type AssistantMessage, type CompletionRequest, EFFORTS, type Message, type Provider } from "../llm.ts";
 
 // Anthropic only accepts [a-zA-Z0-9_-] ids; other providers' ids (e.g. "functions.bash:0") are mapped deterministically
 const toolId = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -58,8 +58,15 @@ export function anthropicProvider(options?: ConstructorParameters<typeof Anthrop
     async contextWindow(model) {
       return (await client.models.retrieve(model)).max_input_tokens ?? undefined;
     },
+    async efforts(model) {
+      const c = (await client.models.retrieve(model)).capabilities;
+      if (!c) return undefined;
+      return EFFORTS.filter((e) =>
+        e === "off" ? c.thinking.types.disabled.supported : c.effort.supported && c.effort[e]?.supported,
+      );
+    },
     async complete(
-      { model, system, messages, tools, signal }: CompletionRequest,
+      { model, system, messages, tools, effort, signal }: CompletionRequest,
       onText,
       onThinking,
     ): Promise<AssistantMessage> {
@@ -70,7 +77,8 @@ export function anthropicProvider(options?: ConstructorParameters<typeof Anthrop
           // automatic caching: marks the last cacheable block, so each turn reads the previous turn's prefix
           cache_control: { type: "ephemeral" },
           // ponytail: adaptive only, pre-4.6 models (e.g. Haiku 4.5) reject it; pick per model if they matter
-          thinking: { type: "adaptive", display: "summarized" },
+          thinking: effort === "off" ? { type: "disabled" } : { type: "adaptive", display: "summarized" },
+          ...(effort && effort !== "off" && { output_config: { effort } }),
           system,
           messages: messages.flatMap(toAnthropic),
           tools: tools.map((t) => ({

@@ -95,7 +95,8 @@ function Layout({ cli, slots }: { cli: Cli; slots: Slots }) {
     else if (key.ctrl && input === "c") {
       setInput("");
       setInScroll(0);
-    } else if (key.escape && menu.shown) menu.hide();
+    } else if (key.tab && key.shift) cli.cycleEffort();
+    else if (key.escape && menu.shown) menu.hide();
     else if (key.escape) cli.abort();
   });
 
