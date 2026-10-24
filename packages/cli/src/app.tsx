@@ -51,10 +51,12 @@ export function App({ session, providers }: { session: Session; providers: strin
     else if (key.ctrl && input === "c") {
       setInput("");
       setInScroll(0);
-    } else if (key.upArrow) setInScroll((n) => clamp(n + 1));
+    } else if (key.escape) aborter.current?.abort();
+    else if (key.upArrow) setInScroll((n) => clamp(n + 1));
     else if (key.downArrow) setInScroll((n) => clamp(n - 1));
   });
 
+  const aborter = useRef<AbortController>(null);
   const push = (...e: Entry[]) => setEntries((prev) => [...prev, ...e]);
   // the agent outlives a turn, so its handlers write to the current turn through a ref
   const cur = useRef({ thinking: "", text: "", turn: [] as Message[] });
@@ -92,6 +94,8 @@ export function App({ session, providers }: { session: Session; providers: strin
     push(entry("user", value));
     const turn: Message[] = [{ role: "user", content: value }];
     cur.current = { thinking: "", text: "", turn };
+    const abort = new AbortController();
+    aborter.current = abort;
     try {
       // created on first submit so a plugin load error is reported like any other
       agent.current ??= createAgent({
@@ -127,10 +131,17 @@ export function App({ session, providers }: { session: Session; providers: strin
           },
         },
       });
-      await (await agent.current).run([...session.messages, ...turn], {
-        model: session.model,
-        provider: session.provider,
-      });
+      await (await agent.current)
+        .run([...session.messages, ...turn], { model: session.model, provider: session.provider, signal: abort.signal })
+        .catch((e) => {
+          if (!abort.signal.aborted) throw e;
+        });
+      if (abort.signal.aborted) {
+        // the partial reply stays on screen but not in history; completed messages are kept
+        flush();
+        // error entries get no separator row, so the leading newline adds one; the next turn adds the one below
+        push(entry("error", "\nInterrupted"));
+      }
       session.messages.push(...turn);
       await session.append(turn);
     } catch (e) {
@@ -163,7 +174,7 @@ export function App({ session, providers }: { session: Session; providers: strin
       {prompt}
       <Text dimColor wrap="truncate">
         {copied === undefined
-          ? "Wheel/PgUp/PgDn scroll · ↑/↓ input · Shift+Enter newline · Ctrl+C clear · Ctrl+D quit"
+          ? "Wheel/PgUp/PgDn scroll · ↑/↓ input · Shift+Enter newline · Esc interrupt · Ctrl+C clear · Ctrl+D quit"
           : `Copied ${copied} chars`}
       </Text>
     </Box>

@@ -56,23 +56,26 @@ export function anthropicProvider(options?: ConstructorParameters<typeof Anthrop
       return ids;
     },
     async complete(
-      { model, system, messages, tools }: CompletionRequest,
+      { model, system, messages, tools, signal }: CompletionRequest,
       onText,
       onThinking,
     ): Promise<AssistantMessage> {
-      const stream = client.messages.stream({
-        model,
-        max_tokens: 64000,
-        // ponytail: adaptive only, pre-4.6 models (e.g. Haiku 4.5) reject it; pick per model if they matter
-        thinking: { type: "adaptive", display: "summarized" },
-        system,
-        messages: messages.flatMap(toAnthropic),
-        tools: tools.map((t) => ({
-          name: t.name,
-          description: t.description,
-          input_schema: z.toJSONSchema(t.inputSchema) as Anthropic.Tool.InputSchema,
-        })),
-      });
+      const stream = client.messages.stream(
+        {
+          model,
+          max_tokens: 64000,
+          // ponytail: adaptive only, pre-4.6 models (e.g. Haiku 4.5) reject it; pick per model if they matter
+          thinking: { type: "adaptive", display: "summarized" },
+          system,
+          messages: messages.flatMap(toAnthropic),
+          tools: tools.map((t) => ({
+            name: t.name,
+            description: t.description,
+            input_schema: z.toJSONSchema(t.inputSchema) as Anthropic.Tool.InputSchema,
+          })),
+        },
+        { signal },
+      );
       for await (const event of stream) {
         if (event.type !== "content_block_delta") continue;
         if (event.delta.type === "text_delta") onText(event.delta.text);

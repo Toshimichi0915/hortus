@@ -45,6 +45,8 @@ export interface CompletionRequest {
   system: string;
   messages: Message[];
   tools: Tool[];
+  /** aborts the stream; the provider rejects */
+  signal?: AbortSignal;
 }
 
 export interface Provider {

@@ -49,18 +49,21 @@ export function openaiProvider(options?: ConstructorParameters<typeof OpenAI>[0]
       return ids;
     },
     async complete(
-      { model, system, messages, tools }: CompletionRequest,
+      { model, system, messages, tools, signal }: CompletionRequest,
       onText,
       onThinking,
     ): Promise<AssistantMessage> {
-      const stream = client.chat.completions.stream({
-        model,
-        messages: [{ role: "system", content: system }, ...messages.flatMap(toOpenAI)],
-        tools: tools.map((t) => ({
-          type: "function",
-          function: { name: t.name, description: t.description, parameters: z.toJSONSchema(t.inputSchema) },
-        })),
-      });
+      const stream = client.chat.completions.stream(
+        {
+          model,
+          messages: [{ role: "system", content: system }, ...messages.flatMap(toOpenAI)],
+          tools: tools.map((t) => ({
+            type: "function",
+            function: { name: t.name, description: t.description, parameters: z.toJSONSchema(t.inputSchema) },
+          })),
+        },
+        { signal },
+      );
       for await (const chunk of stream) {
         const delta = chunk.choices[0]?.delta;
         // `reasoning` is OpenRouter's extension; plain OpenAI chat completions doesn't stream reasoning
