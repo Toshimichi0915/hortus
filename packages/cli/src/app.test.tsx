@@ -8,8 +8,13 @@ import type { Cli } from "./cli.ts";
 
 // just enough of a Cli for the built-in status bar to render
 const cli = {
-  session: createStore(() => ({ messages: [] })),
-  ui: createStore(() => ({ entries: [], live: { thinking: "", text: "" }, turn: [], busy: false })),
+  ui: createStore(() => ({
+    session: createStore(() => ({ messages: [] })),
+    entries: [],
+    live: { thinking: "", text: "" },
+    turn: [],
+    busy: false,
+  })),
 } as unknown as Cli;
 
 const render = (plugins: CliPlugin[], onError: (text: string) => void = assert.fail) => {

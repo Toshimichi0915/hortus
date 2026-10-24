@@ -1,9 +1,13 @@
 import type { Agent, Message, Plugin, Session, ToolCall } from "@phi/core";
 import { createStore } from "zustand/vanilla";
+import type { CliPlugin } from "./api.ts";
+import { builtinCommands, type Command, findCommand, parseCommand } from "./commands.ts";
 import { type Entry, entry, formatTool } from "./entry.ts";
 
 /** What the TUI shows; written only by `createCli`, read through `useUi`. */
 export interface UiState {
+  /** the session shown and run on; swapped by `setSession` (e.g. /new) */
+  session: Session;
   entries: Entry[];
   /** streamed thinking and text not yet turned into entries */
   live: { thinking: string; text: string };
@@ -34,20 +38,11 @@ export function replay(messages: Message[]): Entry[] {
   return out;
 }
 
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-/**
- * The TUI's logic, without React: runs the agent on `session`, turns its events into transcript entries and keeps
- * `status` in step with the session's model and provider. `providers` are the names in secrets.json (for /provider);
- * `makeAgent` creates the agent with the run observer it's given.
- */
-export async function createCli(
-  session: Session,
-  providers: string[],
-  makeAgent: (observer: Plugin) => Promise<Agent>,
-) {
+/** UI state for showing `session` from its start: its file and settings, then its messages so far. */
+function show(session: Session) {
   const { messages, model, provider } = session.getState();
-  const ui = createStore<UiState>()(() => ({
+  return {
+    session,
     entries: [
       entry(
         "info",
@@ -57,8 +52,19 @@ export async function createCli(
     ],
     live: { thinking: "", text: "" },
     turn: [],
-    busy: false,
-  }));
+    copied: undefined,
+  };
+}
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * The TUI's logic, without React: runs the agent on `session` or a `/name arg` command, turns its events into
+ * transcript entries and keeps `status` in step with the session's model and provider. `makeAgent` creates the agent
+ * with the run observer it's given.
+ */
+export async function createCli(session: Session, makeAgent: (observer: Plugin) => Promise<Agent>) {
+  const ui = createStore<UiState>()(() => ({ ...show(session), busy: false }));
   const push = (...e: Entry[]) => ui.setState((s) => ({ entries: [...s.entries, ...e] }));
   // Deltas reach `live` at most once a frame: every store change renders synchronously (useSyncExternalStore), and a
   // fast stream of back-to-back sync renders trips React's nested-update limit while Ink's useBoxMetrics has updates
@@ -125,11 +131,21 @@ export async function createCli(
     },
   });
 
-  // re-resolved whenever the session's model or provider changes
+  // later plugins win, so a command can be replaced by name (like tools)
+  const commands = [
+    ...new Map(
+      [...builtinCommands, ...(agent.plugins as CliPlugin[]).flatMap((p) => p.cli?.commands ?? [])].map((c) => [
+        c.name,
+        c,
+      ]),
+    ).values(),
+  ];
+
+  // re-resolved whenever the session, or its model or provider, changes
   let seq = 0;
   async function refreshStatus() {
     const n = ++seq;
-    const { model, provider } = session.getState();
+    const { model, provider } = ui.getState().session.getState();
     try {
       const r = await agent.resolve({ model, provider });
       // a newer change won; don't overwrite it with a stale result
@@ -141,27 +157,22 @@ export async function createCli(
       if (n === seq) ui.setState({ status: undefined });
     }
   }
-  session.subscribe((s, prev) => {
-    if (s.model !== prev.model || s.provider !== prev.provider) void refreshStatus();
+  const watch = (session: Session) =>
+    session.subscribe((s, prev) => {
+      if (s.model !== prev.model || s.provider !== prev.provider) void refreshStatus();
+    });
+  let unwatch = watch(session);
+  ui.subscribe((s, prev) => {
+    if (s.session === prev.session) return;
+    unwatch();
+    unwatch = watch(s.session);
+    void refreshStatus();
   });
   void refreshStatus();
 
   let aborter: AbortController | undefined;
   async function run(value: string) {
-    const cmd = value.trim().match(/^\/model(?:\s+(\S+))?$/);
-    if (cmd) {
-      if (!cmd[1]) return push(entry("info", `Model: ${session.getState().model ?? "(config default)"}`));
-      await session.setModel(cmd[1]);
-      return push(entry("info", `Model set to ${cmd[1]}`));
-    }
-    const pcmd = value.trim().match(/^\/provider(?:\s+(\S+))?$/);
-    if (pcmd) {
-      if (!pcmd[1]) return push(entry("info", `Provider: ${session.getState().provider ?? "(config default)"}`));
-      if (!providers.includes(pcmd[1]))
-        return push(entry("error", `Unknown provider: ${pcmd[1]} (${providers.join(", ")})`));
-      await session.setProvider(pcmd[1]);
-      return push(entry("info", `Provider set to ${pcmd[1]}`));
-    }
+    const { session } = ui.getState();
     const turn: Message[] = [{ role: "user", content: value }];
     // blank rows pad the message's background, as pi does
     ui.setState((s) => ({ busy: true, turn, entries: [...s.entries, entry("user", `\n${value}\n`)] }));
@@ -189,22 +200,53 @@ export async function createCli(
     ui.setState({ busy: false });
   }
 
-  return {
-    session,
+  // not busy meanwhile, so a command can start a turn with `submit`
+  async function command(c: Command, arg: string) {
+    try {
+      const text = await c.run(arg, cli);
+      if (text) push(entry("info", text));
+    } catch (e) {
+      push(entry("error", errorText(e)));
+    }
+  }
+
+  const cli = {
     ui,
-    plugins: agent.plugins,
-    /** starts `value` as a command or the next turn; false (the prompt keeps its input) when blank or still running */
+    agent,
+    /** the session shown, `ui`'s `session` */
+    get session() {
+      return ui.getState().session;
+    },
+    /** the built-ins and every plugin's `cli.commands`, one per name */
+    commands,
+    /**
+     * starts `value` as a command or the next turn; false (the prompt keeps its input) when blank, still running or an
+     * unknown command
+     */
     submit: (value: string) => {
       if (!value.trim() || ui.getState().busy) return false;
+      const cmd = parseCommand(value.trim());
+      const c = cmd && findCommand(commands, cmd.name);
+      if (cmd && !c) {
+        push(entry("error", `Unknown command: /${cmd.name}`));
+        return false;
+      }
       ui.setState({ copied: undefined });
-      run(value).catch((e) => push(entry("error", errorText(e))));
+      (c ? command(c, cmd?.arg ?? "") : run(value)).catch((e) => push(entry("error", errorText(e))));
       return true;
     },
     abort: () => aborter?.abort(),
     setCopied: (chars: number) => ui.setState({ copied: chars }),
     /** adds an error entry to the transcript */
     report: (text: string) => push(entry("error", text)),
+    /** shows `session` in place of the current one: the transcript restarts from its messages, and runs go to it */
+    setSession: (session: Session) => {
+      // the running turn would end up split between the two
+      if (ui.getState().busy) throw new Error("Can't switch sessions while a turn is running");
+      ui.setState(show(session));
+    },
   };
+  return cli;
 }
 
 export type Cli = Awaited<ReturnType<typeof createCli>>;

@@ -3,19 +3,6 @@ import type { Image, Message, Tool, ToolCall, ToolResult } from "./llm.ts";
 import { type LoadOptions, loadPlugins } from "./plugins.ts";
 import { loadSecrets } from "./secrets.ts";
 
-/** Models of every provider in secrets.json whose type is a known plugin provider. */
-export async function listModels(opts?: LoadOptions) {
-  const [{ providers }, secrets] = await Promise.all([loadPlugins(undefined, opts), loadSecrets()]);
-  const lists = await Promise.all(
-    Object.entries(secrets).map(async ([name, secret]) => {
-      const def = secret && providers[secret.type];
-      if (!secret || !def) return [];
-      return (await def.create(secret).listModels()).map((id) => ({ provider: name, id }));
-    }),
-  );
-  return lists.flat();
-}
-
 const maxSteps = 50;
 
 async function runTool(tools: Tool[], call: ToolCall): Promise<ToolResult> {
@@ -50,7 +37,7 @@ export async function createAgent(opts?: LoadOptions) {
   /** Provider name, model and provider instance a run with `opts` would use; throws if any is missing. */
   async function resolve(opts: Pick<RunOptions, "model" | "provider"> = {}) {
     const name = opts.provider ?? config.provider;
-    if (!name) throw new Error("No provider selected. Set 'provider' in ~/.phi/config.json or use /provider");
+    if (!name) throw new Error("No provider selected. Set 'provider' in ~/.phi/config.json or use /model");
     // read per run so a key set mid-session applies; explicit so the SDKs never fall back to their env vars
     const secret = (await loadSecrets())[name];
     if (!secret) throw new Error(`No API key for ${name}. Add it to ~/.phi/secrets.json`);
@@ -61,6 +48,19 @@ export async function createAgent(opts?: LoadOptions) {
     const model = opts.model ?? (name === config.provider ? config.model : undefined);
     if (!model) throw new Error("No model selected. Set 'model' in ~/.phi/config.json or use /model");
     return { name, model, provider };
+  }
+
+  /** Models of every provider in secrets.json whose type is a known plugin provider. */
+  async function listModels() {
+    const lists = await Promise.allSettled(
+      Object.entries(await loadSecrets()).map(async ([name, secret]) => {
+        const def = secret && providers[secret.type];
+        if (!secret || !def) return [];
+        return (await def.create(secret).listModels()).map((id) => ({ provider: name, id }));
+      }),
+    );
+    // a provider whose listing fails is skipped, so one bad key doesn't hide the others' models
+    return lists.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
   }
 
   /** Runs the tool loop on top of `history` until the model stops calling tools. `model`/`provider` override the config. */
@@ -91,7 +91,7 @@ export async function createAgent(opts?: LoadOptions) {
     }
   }
 
-  return { providers, plugins, resolve, run };
+  return { providers, plugins, resolve, listModels, run };
 }
 
 export type Agent = Awaited<ReturnType<typeof createAgent>>;

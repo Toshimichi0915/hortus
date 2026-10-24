@@ -2,6 +2,7 @@ import {
   Box,
   type CursorPosition,
   type DOMElement,
+  type Key,
   measureElement,
   Text,
   useBoxMetrics,
@@ -66,23 +67,27 @@ export function moveRow(chars: string[], pos: number, width: number, dir: -1 | 1
 }
 
 /** Multi-line text input: Enter submits, Shift+Enter (or Alt+Enter where the terminal can't report Shift) inserts a newline.
- * ↑/↓ move between visual rows; `onCaretRow` reports the caret's row counted from the bottom, so a scroller can follow it. */
+ * ↑/↓ move between visual rows; `onCaretRow` reports the caret's row counted from the bottom, so a scroller can follow it.
+ * `onKey` sees every key first; returning true keeps it from the input. */
 export function PromptInput({
   value,
   onChange,
   onSubmit,
+  onKey,
   onCaretRow,
 }: {
   value: string;
   onChange: (value: string) => void;
   onSubmit: (value: string) => void;
+  onKey?: (input: string, key: Key) => boolean;
   onCaretRow?: (fromBottom: number) => void;
 }) {
   // cursor counts code points, so emoji move as one step
   const chars = [...value];
-  const [cursor, setCursor] = useState(chars.length);
-  // the parent may shorten the value (submit, clear)
-  const pos = Math.min(cursor, chars.length);
+  // kept with the value it was placed in: a value the parent put there instead (the clear on submit, a menu fill)
+  // puts the caret at its end
+  const [cursor, setCursor] = useState({ value, pos: chars.length });
+  const pos = cursor.value === value ? cursor.pos : chars.length;
 
   // wrap ourselves (instead of letting Ink) so we know which row/column the caret lands on
   const ref = useRef<DOMElement>(null);
@@ -94,14 +99,16 @@ export function PromptInput({
   const latest = useRef({ chars, pos });
   latest.current = { chars, pos };
   const update = (next: string[], at: number) => {
+    const text = next.join("");
     latest.current = { chars: next, pos: at };
-    onChange(next.join(""));
-    setCursor(at);
+    onChange(text);
+    setCursor({ value: text, pos: at });
     const { rows, caret } = layout(next, at, width);
     onCaretRow?.(rows.length - 1 - caret.row);
   };
 
   useInput((input, key) => {
+    if (onKey?.(input, key)) return;
     const { chars, pos } = latest.current;
     const insert = (text: string) =>
       update([...chars.slice(0, pos), ...text, ...chars.slice(pos)], pos + [...text].length);

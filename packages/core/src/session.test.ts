@@ -60,12 +60,14 @@ test("session changes reach subscribers with the previous state, and the file re
   await session.setModel("m");
   await session.append([{ role: "user", content: "hi" }]);
   await session.setProvider("p");
+  await session.setModel("m2", "p2");
   assert.deepEqual(
     seen.map(([s, prev]) => [prev.model, s.model, prev.messages.length, s.messages.length, s.provider]),
     [
       [undefined, "m", 0, 0, undefined],
       ["m", "m", 0, 1, undefined],
       ["m", "m", 1, 1, "p"],
+      ["m", "m2", 1, 1, "p2"],
     ],
   );
   const entries = (await readFile(session.path, "utf8"))

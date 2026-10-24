@@ -28,7 +28,7 @@ export interface Manifest extends z.infer<typeof ManifestSchema> {
   dir: string;
 }
 
-/** Options shared by everything that loads plugins (`loadPlugins`, `createAgent`, `listModels`). */
+/** Options shared by everything that loads plugins (`loadPlugins`, `createAgent`). */
 export interface LoadOptions {
   /** names the host provides itself, e.g. `{ "@phi/cli": "0.1.0" }`; plugins depend on them like on any plugin */
   provided?: Record<string, string>;

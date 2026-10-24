@@ -15,7 +15,7 @@ test("status follows the session's model and provider, and a stale resolve doesn
     return { name: provider, model, provider: { contextWindow: async () => 1000 } };
   };
   const agent = { plugins: [], resolve, run: async () => {} } as unknown as Agent;
-  const cli = await createCli(session, [], async () => agent);
+  const cli = await createCli(session, async () => agent);
   const status = async () => {
     await sleep(10);
     return cli.ui.getState().status;
@@ -42,7 +42,7 @@ test("streamed deltas reach the store once a frame, and none are lost when the r
     await observer?.on?.message?.({ role: "assistant", text: "abcd", toolCalls: [] });
   };
   const resolve = async () => ({ name: "p", model: "m", provider: {} });
-  const cli = await createCli(session, [], async (o) => {
+  const cli = await createCli(session, async (o) => {
     observer = o;
     return { plugins: [], resolve, run } as unknown as Agent;
   });

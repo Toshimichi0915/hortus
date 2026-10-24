@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { stdout } from "node:process";
-import { createAgent, type LoadOptions, listSessions, loadSecrets, openSession, type SessionInfo } from "@phi/core";
+import { createAgent, type LoadOptions, listSessions, openSession, type SessionInfo } from "@phi/core";
 import { render } from "ink";
 import { App } from "./app.tsx";
 import { createCli } from "./cli.ts";
@@ -18,8 +18,6 @@ const { version } = JSON.parse(readFileSync(new URL("../package.json", import.me
 // plugins can depend on "@phi/cli" in their phi.json; that's us
 const load: LoadOptions = { provided: { "@phi/cli": version } };
 
-// the names configured in secrets.json (for /provider)
-const providers = Object.keys(await loadSecrets());
 // `phi -r <id>` resumes that session, `phi -r` picks one from a list
 const [flag, id, ...rest] = process.argv.slice(2);
 const fail = (message: string) => {
@@ -42,7 +40,7 @@ if (flag) {
   }
 }
 const session = await openSession(resume?.leafId ?? null);
-const cli = await createCli(session, providers, (observer) => createAgent({ ...load, extra: [observer] }));
+const cli = await createCli(session, (observer) => createAgent({ ...load, extra: [observer] }));
 // report button presses, drags and wheel (1002) in SGR encoding (1006); always switched back off on exit
 stdout.write("\x1b[?1002h\x1b[?1006h");
 process.on("exit", () => stdout.write("\x1b[?1002l\x1b[?1006l"));

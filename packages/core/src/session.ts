@@ -33,7 +33,8 @@ export interface Session extends Pick<StoreApi<SessionState>, "getState" | "getI
   leafId: string | null;
   /** adds to `messages` and the file */
   append(msgs: Message[]): Promise<void>;
-  setModel(model: string): Promise<void>;
+  /** `provider` defaults to the current one; both go in one entry */
+  setModel(model: string, provider?: string): Promise<void>;
   setProvider(provider: string): Promise<void>;
 }
 
@@ -147,9 +148,9 @@ export async function openSession(id: string | null, dir = sessionsDir): Promise
       store.setState((s) => ({ messages: [...s.messages, ...msgs] }));
       return write(msgs.map((message) => ({ type: "message", message })));
     },
-    setModel: (model) => {
-      store.setState({ model });
-      return write([{ type: "model", model, provider: store.getState().provider }]);
+    setModel: (model, provider = store.getState().provider) => {
+      store.setState({ model, provider });
+      return write([{ type: "model", model, provider }]);
     },
     setProvider: (provider) => {
       store.setState({ provider });

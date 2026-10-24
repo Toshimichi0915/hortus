@@ -2,6 +2,7 @@ import { Box, type BoxProps, type DOMElement, Text, useApp, useBoxMetrics, useIn
 import { Component, type ComponentType, type ReactNode, useMemo, useRef, useState } from "react";
 import { CliContext, type CliPlugin, type Slots, useUi } from "./api.ts";
 import type { Cli } from "./cli.ts";
+import { CommandMenu, useCommandMenu } from "./command-menu.tsx";
 import { theme } from "./entry.ts";
 import { PromptInput } from "./prompt-input.tsx";
 import { StatusBar } from "./status-bar.tsx";
@@ -69,7 +70,7 @@ export function composeSlots(plugins: CliPlugin[], onError: (text: string) => vo
 
 /** The TUI; plugins' `cli` overrides are composed once into the slots it renders. */
 export function App({ cli }: { cli: Cli }) {
-  const slots = useMemo(() => composeSlots(cli.plugins as CliPlugin[], cli.report), [cli]);
+  const slots = useMemo(() => composeSlots(cli.agent.plugins as CliPlugin[], cli.report), [cli]);
   return (
     <CliContext value={cli}>
       <Layout cli={cli} slots={slots} />
@@ -81,7 +82,9 @@ function Layout({ cli, slots }: { cli: Cli; slots: Slots }) {
   const entries = useUi((s) => s.entries);
   const live = useUi((s) => s.live);
   const busy = useUi((s) => s.busy);
+  const path = useUi((s) => s.session.path);
   const [input, setInput] = useState("");
+  const menu = useCommandMenu(cli, input, setInput);
   // rows the input is scrolled up from its end; clamped on read by ScrollBox, so overshoot just sticks at the top
   const [inScroll, setInScroll] = useState(0);
   const { rows } = useWindowSize();
@@ -92,7 +95,8 @@ function Layout({ cli, slots }: { cli: Cli; slots: Slots }) {
     else if (key.ctrl && input === "c") {
       setInput("");
       setInScroll(0);
-    } else if (key.escape) cli.abort();
+    } else if (key.escape && menu.shown) menu.hide();
+    else if (key.escape) cli.abort();
   });
 
   const submit = (value: string) => {
@@ -114,6 +118,8 @@ function Layout({ cli, slots }: { cli: Cli; slots: Slots }) {
   return (
     <Box flexDirection="column" height={rows}>
       <Transcript
+        // another session (/new) starts unscrolled, with nothing selected
+        key={path}
         entries={shown}
         onWheelBelow={(delta) => setInScroll((n) => clamp(n + delta))}
         onCopy={cli.setCopied}
@@ -131,11 +137,13 @@ function Layout({ cli, slots }: { cli: Cli; slots: Slots }) {
             value={input}
             onChange={setInput}
             onSubmit={submit}
+            onKey={menu.onKey}
             // scroll just enough to keep the caret's row in view
             onCaretRow={(row) => setInScroll((n) => Math.min(row, Math.max(n, row - INPUT_ROWS + 1)))}
           />
         </ScrollBox>
       </Box>
+      {menu.shown && <CommandMenu rows={menu.rows} at={menu.at} />}
       <slots.statusBar />
     </Box>
   );

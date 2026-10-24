@@ -13,7 +13,7 @@ const SecretSchema = z
   })
   .optional();
 
-// keyed by the name users select with set-provider / /provider, e.g. { openrouter: { type: "openai", ... } }
+// keyed by the name users select with config.provider / /model, e.g. { openrouter: { type: "openai", ... } }
 export const SecretsSchema = z.record(z.string(), SecretSchema);
 export type Secrets = z.infer<typeof SecretsSchema>;
 
