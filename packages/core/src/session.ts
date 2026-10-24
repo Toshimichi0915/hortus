@@ -73,15 +73,41 @@ export function branch(entries: SessionEntry[], leafId: string): SessionState {
   return state;
 }
 
-/** Last-appended entry id of a session. sessionId: uuid (or file name) to match, true = latest session */
-export async function lastEntryId(sessionId: string | true) {
+export interface SessionInfo {
+  /** the uuid in the file name */
+  id: string;
+  path: string;
+  /** last-appended entry, what `openSession` resumes from */
+  leafId: string;
+  /** first user message, for picking a session */
+  title: string;
+  created: Date;
+}
+
+/** Non-empty sessions in `dir`, newest first. */
+export async function listSessions(dir = sessionsDir): Promise<SessionInfo[]> {
   // epoch prefix makes lexical order chronological
-  const names = (await readdir(sessionsDir).catch(() => [])).filter((n) => n.endsWith(".jsonl")).sort();
-  const found = sessionId === true ? names.at(-1) : names.find((n) => n.includes(sessionId));
-  if (!found) throw new Error(sessionId === true ? "No sessions to resume" : `Session not found: ${sessionId}`);
-  const last = parse(await readFile(join(sessionsDir, found), "utf8")).at(-1);
-  if (!last) throw new Error(`Session is empty: ${found}`);
-  return last.id;
+  const names = (await readdir(dir).catch(() => []))
+    .filter((n) => n.endsWith(".jsonl"))
+    .sort()
+    .reverse();
+  const out: SessionInfo[] = [];
+  // ponytail: parses every session file in full; keep a title/leaf index if this gets slow
+  for (const n of names) {
+    const entries = parse(await readFile(join(dir, n), "utf8"));
+    const leaf = entries.at(-1);
+    if (!leaf) continue;
+    const title = entries.find((e) => e.type === "message" && e.message.role === "user");
+    const [epoch = "0", id = n] = n.slice(0, -".jsonl".length).split("_");
+    out.push({
+      id,
+      path: join(dir, n),
+      leafId: leaf.id,
+      title: title?.type === "message" && title.message.role === "user" ? title.message.content : "",
+      created: new Date(Number(epoch) * 1000),
+    });
+  }
+  return out;
 }
 
 /** id: entry to resume from (its session file is found by scanning `dir`), null = new session */

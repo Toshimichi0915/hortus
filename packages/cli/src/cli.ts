@@ -16,6 +16,24 @@ export interface UiState {
   copied?: number;
 }
 
+/** Transcript entries for messages already in the session, so a resumed one shows as it was left. */
+export function replay(messages: Message[]): Entry[] {
+  const out: Entry[] = [];
+  const calls = new Map<string, ToolCall>();
+  for (const m of messages) {
+    if (m.role === "user") out.push(entry("user", `\n${m.content}\n`));
+    else if (m.role === "assistant") {
+      if (m.text) out.push(entry("assistant", m.text));
+      for (const c of m.toolCalls) calls.set(c.id, c);
+    } else
+      for (const r of m.results) {
+        const c = calls.get(r.id);
+        if (c) out.push(entry(r.isError ? "toolError" : "toolOk", formatTool(c, r)));
+      }
+  }
+  return out;
+}
+
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
@@ -35,6 +53,7 @@ export async function createCli(
         "info",
         `Session: ${session.path} (${messages.length} messages)${provider ? ` · provider: ${provider}` : ""}${model ? ` · model: ${model}` : ""}`,
       ),
+      ...replay(messages),
     ],
     live: { thinking: "", text: "" },
     turn: [],

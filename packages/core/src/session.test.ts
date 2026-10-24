@@ -3,7 +3,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { branch, openSession, type SessionEntry, type SessionState } from "./session.ts";
+import { branch, listSessions, openSession, type SessionEntry, type SessionState } from "./session.ts";
 
 test("branch walks from the leaf to the root, skipping sibling branches", () => {
   const e = (id: string, parentId: string | null): SessionEntry => ({
@@ -73,4 +73,23 @@ test("session changes reach subscribers with the previous state, and the file re
     .filter(Boolean)
     .map((line) => JSON.parse(line) as SessionEntry);
   assert.deepEqual(branch(entries, session.leafId ?? ""), session.getState());
+});
+
+test("listSessions lists non-empty sessions newest first, titled by the first user message, resumable at the leaf", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "phi-"));
+  const a = await openSession(null, dir);
+  await a.setModel("m");
+  await a.append([
+    { role: "user", content: "first" },
+    { role: "user", content: "second" },
+  ]);
+  await openSession(null, dir); // never written, so no file
+  const list = await listSessions(dir);
+  assert.equal(list.length, 1);
+  assert.equal(list[0]?.title, "first");
+  assert.equal(list[0]?.path, a.path);
+  assert.ok(a.path.includes(list[0]?.id ?? "?"));
+  const resumed = await openSession(list[0]?.leafId ?? null, dir);
+  assert.equal(resumed.path, a.path);
+  assert.equal(resumed.getState().messages.length, 2);
 });
