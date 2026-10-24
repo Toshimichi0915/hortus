@@ -33,3 +33,8 @@ export interface Provider {
   /** Model ids usable as CompletionRequest.model. */
   listModels(): Promise<string[]>;
 }
+
+export type ProviderDef = { create: (apiKey: string) => Provider; defaultModel: string };
+
+/** Default export of a plugin module listed in config.plugins. */
+export type Plugin = { providers?: Record<string, ProviderDef>; tools?: Tool[] };

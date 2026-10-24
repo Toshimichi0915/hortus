@@ -1,43 +1,32 @@
-import { exec } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
-import { promisify } from "node:util";
-import { z } from "zod";
-import { loadConfig, PROVIDERS, type ProviderName } from "./config.ts";
-import { type Message, type Provider, type ToolCall, type ToolResult, tool } from "./llm.ts";
-import { anthropicProvider } from "./providers/anthropic.ts";
-import { openaiProvider } from "./providers/openai.ts";
-import { openrouterProvider } from "./providers/openrouter.ts";
+import { loadConfig } from "./config.ts";
+import type { Message, Tool, ToolCall, ToolResult } from "./llm.ts";
+import { loadPlugins } from "./plugins.ts";
 import { loadSecrets } from "./secrets.ts";
 
-const sh = promisify(exec);
-
-const providers: Record<ProviderName, (apiKey: string) => { provider: Provider; defaultModel: string }> = {
-  openrouter: (apiKey) => ({ provider: openrouterProvider({ apiKey }), defaultModel: "anthropic/claude-sonnet-5.5" }),
-  openai: (apiKey) => ({ provider: openaiProvider({ apiKey }), defaultModel: "gpt-5" }),
-  anthropic: (apiKey) => ({ provider: anthropicProvider({ apiKey }), defaultModel: "claude-opus-5-5" }),
-};
-
 // resolved per run (not at import) so `phi config` works before a key is set, and config edits apply without restart
-async function resolveProvider(model?: string, providerOverride?: ProviderName) {
+async function resolveProvider(model?: string, providerOverride?: string) {
   const config = await loadConfig();
+  const { providers, tools } = await loadPlugins(config.plugins ?? []);
   const name = providerOverride ?? config.provider;
   if (!name) throw new Error("No provider selected. Run: phi config set-provider <provider>");
+  const def = providers[name];
+  if (!def) throw new Error(`Unknown provider: ${name} (${Object.keys(providers).join(", ")})`);
   // explicit key so the SDKs never fall back to their env vars
   const apiKey = (await loadSecrets())[name]?.apiKey;
   if (!apiKey) throw new Error(`No API key for ${name}. Run: phi config set-key ${name}`);
-  const { provider, defaultModel } = providers[name](apiKey);
   // config.model belongs to config.provider, so it doesn't carry over to another provider
-  return { provider, model: model ?? (name === config.provider ? config.model : undefined) ?? defaultModel };
+  const resolved = model ?? (name === config.provider ? config.model : undefined) ?? def.defaultModel;
+  return { provider: def.create(apiKey), model: resolved, tools };
 }
 
 /** Models of every provider that has an API key set. */
 export async function listModels() {
-  const secrets = await loadSecrets();
+  const [{ providers }, secrets] = await Promise.all([loadPlugins(), loadSecrets()]);
   const lists = await Promise.all(
-    PROVIDERS.map(async (name) => {
+    Object.entries(providers).map(async ([name, def]) => {
       const apiKey = secrets[name]?.apiKey;
       if (!apiKey) return [];
-      return (await providers[name](apiKey).provider.listModels()).map((id) => ({ provider: name, id }));
+      return (await def.create(apiKey).listModels()).map((id) => ({ provider: name, id }));
     }),
   );
   return lists.flat();
@@ -46,39 +35,7 @@ export async function listModels() {
 const system = `You are a coding agent. Working directory: ${process.cwd()}. Use tools to inspect and change files.`;
 const maxSteps = 50;
 
-const tools = [
-  tool({
-    name: "read",
-    description: "Read a file and return its contents.",
-    inputSchema: z.object({ path: z.string() }),
-    execute: ({ path }) => readFile(path, "utf8"),
-  }),
-  tool({
-    name: "write",
-    description: "Write content to a file, overwriting it.",
-    inputSchema: z.object({ path: z.string(), content: z.string() }),
-    execute: async ({ path, content }) => {
-      await writeFile(path, content);
-      return `Wrote ${content.length} chars to ${path}`;
-    },
-  }),
-  tool({
-    name: "bash",
-    description: "Run a bash command and return stdout/stderr.",
-    inputSchema: z.object({ command: z.string() }),
-    execute: async ({ command }) => {
-      try {
-        const { stdout, stderr } = await sh(command, { shell: "/bin/bash", timeout: 120_000 });
-        return { stdout, stderr };
-      } catch (e) {
-        const err = e as { code?: number; stdout?: string; stderr?: string; message: string };
-        return { exitCode: err.code, stdout: err.stdout, stderr: err.stderr ?? err.message };
-      }
-    },
-  }),
-];
-
-async function runTool(call: ToolCall): Promise<ToolResult> {
+async function runTool(tools: Tool[], call: ToolCall): Promise<ToolResult> {
   const t = tools.find((t) => t.name === call.name);
   if (!t) return { id: call.id, output: `Unknown tool: ${call.name}`, isError: true };
   const input = t.inputSchema.safeParse(call.input);
@@ -101,9 +58,9 @@ export async function* runAgent(
   history: Message[],
   onText: (text: string) => void,
   modelOverride?: string,
-  providerOverride?: ProviderName,
+  providerOverride?: string,
 ): AsyncGenerator<AgentEvent> {
-  const { provider, model } = await resolveProvider(modelOverride, providerOverride);
+  const { provider, model, tools } = await resolveProvider(modelOverride, providerOverride);
   const messages = [...history];
   for (let step = 0; step < maxSteps; step++) {
     const assistant = await provider.complete({ model, system, messages, tools }, onText);
@@ -112,7 +69,10 @@ export async function* runAgent(
     if (!assistant.toolCalls.length) return;
 
     for (const call of assistant.toolCalls) yield { type: "tool-call", call };
-    const results: Message = { role: "tool", results: await Promise.all(assistant.toolCalls.map(runTool)) };
+    const results: Message = {
+      role: "tool",
+      results: await Promise.all(assistant.toolCalls.map((c) => runTool(tools, c))),
+    };
     messages.push(results);
     yield { type: "message", message: results };
   }

@@ -10,11 +10,8 @@ const ApiKeySchema = z
   })
   .optional();
 
-export const SecretsSchema = z.object({
-  openrouter: ApiKeySchema,
-  openai: ApiKeySchema,
-  anthropic: ApiKeySchema,
-});
+// keyed by provider name
+export const SecretsSchema = z.record(z.string(), ApiKeySchema);
 export type Secrets = z.infer<typeof SecretsSchema>;
 
 export async function loadSecrets(): Promise<Secrets> {

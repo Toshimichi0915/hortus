@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { PHI_DIR, type ProviderName } from "./config.ts";
+import { PHI_DIR } from "./config.ts";
 import type { Message } from "./llm.ts";
 
 export const sessionsDir = join(PHI_DIR, "sessions");
@@ -11,7 +11,7 @@ export type SessionEntry = { v: 1; id: string; parentId: string | null } & Entry
 type EntryBody =
   | { type: "message"; message: Message }
   // snapshot of both settings; undefined = config default
-  | { type: "model"; model?: string; provider?: ProviderName };
+  | { type: "model"; model?: string; provider?: string };
 
 /** State rebuilt by replaying a branch's entries from the root down. */
 export interface SessionState {
@@ -19,7 +19,7 @@ export interface SessionState {
   /** model picked with setModel on this branch; undefined = config default */
   model?: string;
   /** provider picked with setProvider on this branch; undefined = config default */
-  provider?: ProviderName;
+  provider?: string;
 }
 
 export interface Session extends SessionState {
@@ -28,7 +28,7 @@ export interface Session extends SessionState {
   leafId: string | null;
   append(msgs: Message[]): Promise<void>;
   setModel(model: string): Promise<void>;
-  setProvider(provider: ProviderName): Promise<void>;
+  setProvider(provider: string): Promise<void>;
 }
 
 type Parser = { v: number; type: string; apply(entry: any, state: SessionState): void };
@@ -39,7 +39,7 @@ const parsers: Parser[] = [
   {
     v: 1,
     type: "model",
-    apply: (e: { model?: string; provider?: ProviderName }, s) => {
+    apply: (e: { model?: string; provider?: string }, s) => {
       s.model = e.model;
       s.provider = e.provider;
     },

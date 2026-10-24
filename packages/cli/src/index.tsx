@@ -5,10 +5,9 @@ import {
   lastEntryId,
   listModels,
   loadConfig,
+  loadPlugins,
   loadSecrets,
   openSession,
-  PROVIDERS,
-  type ProviderName,
   saveConfig,
   saveSecrets,
 } from "@phi/core";
@@ -28,7 +27,8 @@ async function promptHidden(question: string) {
   return answer.trim();
 }
 
-const provider = () => new Argument("<provider>").choices(PROVIDERS);
+const providers = Object.keys((await loadPlugins()).providers);
+const provider = () => new Argument("<provider>").choices(providers);
 const program = new Command("phi")
   .option("-r, --resume [uuid]", "resume the latest session, or the one matching uuid")
   .action(async ({ resume }: { resume?: string | true }) => {
@@ -36,7 +36,7 @@ const program = new Command("phi")
     // report button presses, drags and wheel (1002) in SGR encoding (1006); always switched back off on exit
     stdout.write("\x1b[?1002h\x1b[?1006h");
     process.on("exit", () => stdout.write("\x1b[?1002l\x1b[?1006l"));
-    await render(<App session={session} />, {
+    await render(<App session={session} providers={providers} />, {
       alternateScreen: true,
       exitOnCtrlC: false,
       // lets the terminal report Shift+Enter apart from Enter
@@ -54,7 +54,7 @@ const config = program
     const secrets = await loadSecrets();
     console.log(`provider: ${config.provider ?? "(not set)"}`);
     console.log(`model:    ${config.model ?? "(provider default)"}`);
-    for (const p of PROVIDERS) {
+    for (const p of providers) {
       const key = secrets[p]?.apiKey;
       console.log(`${`${p} key:`.padEnd(16)}${key ? `...${key.slice(-4)}` : "(not set)"}`);
     }
@@ -63,7 +63,7 @@ const config = program
 config
   .command("set-provider")
   .addArgument(provider())
-  .action(async (provider: ProviderName) => saveConfig({ ...(await loadConfig()), provider }));
+  .action(async (provider: string) => saveConfig({ ...(await loadConfig()), provider }));
 
 config
   .command("set-model")
@@ -81,7 +81,7 @@ config
   .command("set-key")
   .description("store an API key (empty input removes it)")
   .addArgument(provider())
-  .action(async (provider: ProviderName) => {
+  .action(async (provider: string) => {
     const apiKey = await promptHidden(`${provider} API key (leave empty to remove): `);
     await saveSecrets({ ...(await loadSecrets()), [provider]: apiKey ? { apiKey } : undefined });
   });

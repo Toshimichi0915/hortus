@@ -1,4 +1,4 @@
-import { type Message, PROVIDERS, type ProviderName, runAgent, type Session } from "@phi/core";
+import { type Message, runAgent, type Session } from "@phi/core";
 import { Box, type BoxProps, type DOMElement, Text, useApp, useBoxMetrics, useInput, useWindowSize } from "ink";
 import { type ReactNode, useRef, useState } from "react";
 import { type Entry, entry } from "./entry.ts";
@@ -29,7 +29,7 @@ function ScrollBox({ fromBottom, children, ...props }: BoxProps & { fromBottom: 
 
 const clamp = (n: number) => Math.max(0, Math.min(n, 10_000));
 
-export function App({ session }: { session: Session }) {
+export function App({ session, providers }: { session: Session; providers: string[] }) {
   const [entries, setEntries] = useState(() => [
     entry(
       "info",
@@ -71,9 +71,9 @@ export function App({ session }: { session: Session }) {
     const pcmd = value.trim().match(/^\/provider(?:\s+(\S+))?$/);
     if (pcmd) {
       if (!pcmd[1]) return push(entry("info", `Provider: ${session.provider ?? "(config default)"}`));
-      if (!PROVIDERS.includes(pcmd[1] as ProviderName))
-        return push(entry("error", `Unknown provider: ${pcmd[1]} (${PROVIDERS.join(", ")})`));
-      await session.setProvider(pcmd[1] as ProviderName);
+      if (!providers.includes(pcmd[1]))
+        return push(entry("error", `Unknown provider: ${pcmd[1]} (${providers.join(", ")})`));
+      await session.setProvider(pcmd[1]);
       return push(entry("info", `Provider set to ${pcmd[1]}`));
     }
     setBusy(true);
