@@ -30,6 +30,7 @@ function ScrollBox({ fromBottom, children, ...props }: BoxProps & { fromBottom: 
 }
 
 const clamp = (n: number) => Math.max(0, Math.min(n, 10_000));
+const INPUT_ROWS = 8;
 
 /** A throwing plugin component falls back to the one it replaced instead of taking the whole TUI down. */
 class Guard extends Component<
@@ -86,15 +87,12 @@ function Layout({ cli, slots }: { cli: Cli; slots: Slots }) {
   const { rows } = useWindowSize();
   const { exit } = useApp();
 
-  // PromptInput ignores ↑/↓, so they're free to scroll a long input
   useInput((input, key) => {
     if (key.ctrl && input === "d") exit();
     else if (key.ctrl && input === "c") {
       setInput("");
       setInScroll(0);
     } else if (key.escape) cli.abort();
-    else if (key.upArrow) setInScroll((n) => clamp(n + 1));
-    else if (key.downArrow) setInScroll((n) => clamp(n - 1));
   });
 
   const submit = (value: string) => {
@@ -128,8 +126,14 @@ function Layout({ cli, slots }: { cli: Cli; slots: Slots }) {
         paddingX={1}
       >
         <Text color={theme.accent}>{"> "}</Text>
-        <ScrollBox flexGrow={1} maxHeight={8} fromBottom={inScroll}>
-          <PromptInput value={input} onChange={setInput} onSubmit={submit} />
+        <ScrollBox flexGrow={1} maxHeight={INPUT_ROWS} fromBottom={inScroll}>
+          <PromptInput
+            value={input}
+            onChange={setInput}
+            onSubmit={submit}
+            // scroll just enough to keep the caret's row in view
+            onCaretRow={(row) => setInScroll((n) => Math.min(row, Math.max(n, row - INPUT_ROWS + 1)))}
+          />
         </ScrollBox>
       </Box>
       <slots.statusBar />

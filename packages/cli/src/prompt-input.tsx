@@ -31,21 +31,63 @@ function screenBox(node: DOMElement) {
   return { x: m.x, y: m.y - shift, top, bottom };
 }
 
-/** Multi-line text input: Enter submits, Shift+Enter (or Alt+Enter where the terminal can't report Shift) inserts a newline. */
+/** Visual rows, as code-point ranges into `chars`, and the caret's row/column. */
+function layout(chars: string[], pos: number, width: number) {
+  // `end` is where the row's line ends, `last` whether the row ends it
+  const rows: { text: string; start: number; end: number; last: boolean }[] = [];
+  let lineStart = 0;
+  for (const line of chars.join("").split("\n")) {
+    const end = lineStart + [...line].length;
+    // a caret at the end of a line still needs a cell, so wrap with a space there
+    const wrapped = wrap(pos === end ? `${line} ` : line, width);
+    let start = lineStart;
+    for (const [r, text] of wrapped.entries()) {
+      rows.push({ text, start, end, last: r === wrapped.length - 1 });
+      start += [...text].length;
+    }
+    lineStart = end + 1;
+  }
+  const found = rows.findIndex((r) => pos < r.start + [...r.text].length);
+  const row = found === -1 ? rows.length - 1 : found;
+  const col = stringWidth(chars.slice(rows[row]?.start ?? 0, pos).join(""));
+  return { rows, caret: { row, col } };
+}
+
+/** Where ↑ (`-1`) / ↓ (`1`) takes the caret: the closest column on the neighbouring visual row; undefined past either end. */
+export function moveRow(chars: string[], pos: number, width: number, dir: -1 | 1) {
+  const { rows, caret } = layout(chars, pos, width);
+  const to = rows[caret.row + dir];
+  if (!to) return;
+  // not past the row: a wrapped row's last position belongs to the next one
+  const max = to.last ? to.end : to.start + [...to.text].length - 1;
+  let at = to.start;
+  while (at < max && stringWidth(chars.slice(to.start, at + 1).join("")) <= caret.col) at++;
+  return at;
+}
+
+/** Multi-line text input: Enter submits, Shift+Enter (or Alt+Enter where the terminal can't report Shift) inserts a newline.
+ * ↑/↓ move between visual rows; `onCaretRow` reports the caret's row counted from the bottom, so a scroller can follow it. */
 export function PromptInput({
   value,
   onChange,
   onSubmit,
+  onCaretRow,
 }: {
   value: string;
   onChange: (value: string) => void;
   onSubmit: (value: string) => void;
+  onCaretRow?: (fromBottom: number) => void;
 }) {
   // cursor counts code points, so emoji move as one step
   const chars = [...value];
   const [cursor, setCursor] = useState(chars.length);
   // the parent may shorten the value (submit, clear)
   const pos = Math.min(cursor, chars.length);
+
+  // wrap ourselves (instead of letting Ink) so we know which row/column the caret lands on
+  const ref = useRef<DOMElement>(null);
+  const width = useBoxMetrics(ref).width || Number.MAX_SAFE_INTEGER;
+  const { rows, caret } = layout(chars, pos, width);
 
   // keys can arrive faster than renders (e.g. held Backspace while a reply streams), so each one
   // builds on the previous key's result, not on this render's possibly stale props
@@ -55,6 +97,8 @@ export function PromptInput({
     latest.current = { chars: next, pos: at };
     onChange(next.join(""));
     setCursor(at);
+    const { rows, caret } = layout(next, at, width);
+    onCaretRow?.(rows.length - 1 - caret.row);
   };
 
   useInput((input, key) => {
@@ -64,36 +108,21 @@ export function PromptInput({
     if (key.return) {
       if (key.shift || key.meta) insert("\n");
       else onSubmit(chars.join(""));
-    } else if (key.leftArrow) update(chars, Math.max(0, pos - 1));
-    else if (key.rightArrow) update(chars, Math.min(chars.length, pos + 1));
-    else if (key.backspace || key.delete) {
+    } else if (key.upArrow || key.downArrow) {
+      const at = moveRow(chars, pos, width, key.upArrow ? -1 : 1);
+      if (at !== undefined) update(chars, at);
+    } else if (key.leftArrow || (key.ctrl && input === "b")) update(chars, Math.max(0, pos - 1));
+    else if (key.rightArrow || (key.ctrl && input === "f")) update(chars, Math.min(chars.length, pos + 1));
+    // Home/End stay within the current line of a multi-line input
+    else if (key.home || (key.ctrl && input === "a")) update(chars, chars.slice(0, pos).lastIndexOf("\n") + 1);
+    else if (key.end || (key.ctrl && input === "e")) {
+      const nl = chars.indexOf("\n", pos);
+      update(chars, nl === -1 ? chars.length : nl);
+    } else if (key.backspace) {
       if (pos > 0) update([...chars.slice(0, pos - 1), ...chars.slice(pos)], pos - 1);
+    } else if (key.delete) {
+      if (pos < chars.length) update([...chars.slice(0, pos), ...chars.slice(pos + 1)], pos);
     } else if (input && !key.ctrl && !key.meta) insert(input.replace(/\r\n?/g, "\n"));
-  });
-
-  // wrap ourselves (instead of letting Ink) so we know which row/column the caret lands on
-  const ref = useRef<DOMElement>(null);
-  const width = useBoxMetrics(ref).width || Number.MAX_SAFE_INTEGER;
-  const before = chars.slice(0, pos).join("").split("\n");
-  const lines = value.split("\n");
-  const caretLine = before.length - 1;
-  const caretIdx = (before[caretLine] ?? "").length;
-  const rows: string[] = [];
-  let caret = { row: 0, col: 0 };
-  lines.forEach((line, i) => {
-    // a caret at the end of a line still needs a cell, so wrap with a space there
-    const wrapped = wrap(i === caretLine && caretIdx === line.length ? `${line} ` : line, width);
-    if (i === caretLine) {
-      let rest = caretIdx;
-      for (const [r, text] of wrapped.entries()) {
-        if (rest < text.length || r === wrapped.length - 1) {
-          caret = { row: rows.length + r, col: stringWidth(text.slice(0, rest)) };
-          break;
-        }
-        rest -= text.length;
-      }
-    }
-    rows.push(...wrapped);
   });
 
   // the real terminal cursor sits on the caret, so the IME draws its preedit there; hidden when scrolled out of view.
@@ -112,9 +141,9 @@ export function PromptInput({
 
   return (
     <Box ref={ref} flexDirection="column" width="100%">
-      {rows.map((row, i) => (
+      {rows.map(({ text }, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: rows have no identity beyond their position
-        <Text key={i}>{row || " "}</Text>
+        <Text key={i}>{text || " "}</Text>
       ))}
     </Box>
   );
