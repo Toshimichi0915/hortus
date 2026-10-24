@@ -67,6 +67,8 @@ export function anthropicProvider(options?: ConstructorParameters<typeof Anthrop
         {
           model,
           max_tokens: 64000,
+          // automatic caching: marks the last cacheable block, so each turn reads the previous turn's prefix
+          cache_control: { type: "ephemeral" },
           // ponytail: adaptive only, pre-4.6 models (e.g. Haiku 4.5) reject it; pick per model if they matter
           thinking: { type: "adaptive", display: "summarized" },
           system,
