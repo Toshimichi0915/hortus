@@ -21,38 +21,50 @@ interface Point {
   col: number;
 }
 
+// rows per entry, reused while its kind, text and the width are unchanged (tool entries are mutated in place)
+const cache = new WeakMap<Entry, { kind: Entry["kind"]; text: string; width: number; rows: Row[] }>();
+
+function entryRows(e: Entry, width: number): Row[] {
+  const hit = cache.get(e);
+  if (hit && hit.kind === e.kind && hit.text === e.text && hit.width === width) return hit.rows;
+  const rows: Row[] = [];
+  const block = e.kind.startsWith("tool");
+  // a block's header is its first non-blank line
+  const split = e.text.split("\n");
+  const head = block ? split.findIndex(Boolean) : -1;
+  // ponytail: spots edit diffs by the header formatTool writes; carry the tool name on Entry if that gets ambiguous
+  const diff = block && split[head]?.startsWith("edit ");
+  const color = (t: string, l: number) =>
+    l === head
+      ? theme.text
+      : diff && t.startsWith("+ ")
+        ? theme.green
+        : diff && t.startsWith("- ")
+          ? theme.red
+          : theme.muted;
+  const lines =
+    e.kind === "assistant"
+      ? markdown(e.text, width)
+      : split.map((t, l) => [{ text: t, color: block ? color(t, l) : undefined }]);
+  lines.forEach((spans, l) => {
+    let col = 0;
+    wrap(spans.map((s) => s.text).join(""), Math.max(1, width)).forEach((text, i) => {
+      const w = stringWidth(text);
+      rows.push({ kind: e.kind, text, spans: cutCols(spans, col, col + w), cont: i > 0, bold: l === head });
+      col += w;
+    });
+  });
+  cache.set(e, { kind: e.kind, text: e.text, width, rows });
+  return rows;
+}
+
 export function toRows(entries: Entry[], width: number): Row[] {
   const rows: Row[] = [];
   for (const e of entries) {
-    const block = e.kind.startsWith("tool");
     // a blank row between user input, thinking, output and tool blocks
     if (rows.length && e.kind !== "info" && e.kind !== "error")
       rows.push({ kind: "info", text: "", spans: [], cont: false });
-    // a block's header is its first non-blank line
-    const split = e.text.split("\n");
-    const head = block ? split.findIndex(Boolean) : -1;
-    // ponytail: spots edit diffs by the header formatTool writes; carry the tool name on Entry if that gets ambiguous
-    const diff = block && split[head]?.startsWith("edit ");
-    const color = (t: string, l: number) =>
-      l === head
-        ? theme.text
-        : diff && t.startsWith("+ ")
-          ? theme.green
-          : diff && t.startsWith("- ")
-            ? theme.red
-            : theme.muted;
-    const lines =
-      e.kind === "assistant"
-        ? markdown(e.text, width)
-        : split.map((t, l) => [{ text: t, color: block ? color(t, l) : undefined }]);
-    lines.forEach((spans, l) => {
-      let col = 0;
-      wrap(spans.map((s) => s.text).join(""), Math.max(1, width)).forEach((text, i) => {
-        const w = stringWidth(text);
-        rows.push({ kind: e.kind, text, spans: cutCols(spans, col, col + w), cont: i > 0, bold: l === head });
-        col += w;
-      });
-    });
+    for (const r of entryRows(e, width)) rows.push(r);
   }
   return rows;
 }
@@ -105,7 +117,6 @@ export function Transcript({
 }) {
   const pane = useRef<DOMElement>(null);
   const { width, height } = useBoxMetrics(pane);
-  // ponytail: re-wraps the whole history every render; cache rows per entry if long sessions get slow
   const rows = useMemo(() => toRows(entries, width), [entries, width]);
   const maxTop = Math.max(0, rows.length - height);
   // undefined = follow the bottom; a number pins the top row so new output doesn't move the view
