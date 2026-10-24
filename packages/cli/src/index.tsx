@@ -27,7 +27,9 @@ async function promptHidden(question: string) {
   return answer.trim();
 }
 
-const providers = Object.keys((await loadPlugins()).providers);
+const types = Object.keys((await loadPlugins()).providers);
+// the names configured in secrets.json, each pointing at one of `types`
+const providers = Object.keys(await loadSecrets());
 const provider = () => new Argument("<provider>").choices(providers);
 const program = new Command("phi")
   .option("-r, --resume [uuid]", "resume the latest session, or the one matching uuid")
@@ -54,9 +56,9 @@ const config = program
     const secrets = await loadSecrets();
     console.log(`provider: ${config.provider ?? "(not set)"}`);
     console.log(`model:    ${config.model ?? "(provider default)"}`);
-    for (const p of providers) {
-      const key = secrets[p]?.apiKey;
-      console.log(`${`${p} key:`.padEnd(16)}${key ? `...${key.slice(-4)}` : "(not set)"}`);
+    for (const [name, s] of Object.entries(secrets)) {
+      if (!s) continue;
+      console.log(`${`${name}:`.padEnd(16)}${s.type} ...${s.apiKey.slice(-4)}${s.endpoint ? ` ${s.endpoint}` : ""}`);
     }
   });
 
@@ -79,11 +81,16 @@ config
 
 config
   .command("set-key")
-  .description("store an API key (empty input removes it)")
-  .addArgument(provider())
-  .action(async (provider: string) => {
-    const apiKey = await promptHidden(`${provider} API key (leave empty to remove): `);
-    await saveSecrets({ ...(await loadSecrets()), [provider]: apiKey ? { apiKey } : undefined });
+  .description("store an API key under <name> (empty input removes it)")
+  .argument("<name>", "name to select with set-provider, e.g. openrouter")
+  .addArgument(new Argument("[type]", "provider type (default: the existing one, or <name>)").choices(types))
+  .option("--endpoint <url>", "base URL, e.g. https://openrouter.ai/api/v1")
+  .action(async (name: string, type: string | undefined, { endpoint }: { endpoint?: string }) => {
+    const secrets = await loadSecrets();
+    type ??= secrets[name]?.type ?? name;
+    if (!types.includes(type)) throw new Error(`Unknown provider type: ${type} (${types.join(", ")})`);
+    const apiKey = await promptHidden(`${name} API key (leave empty to remove): `);
+    await saveSecrets({ ...secrets, [name]: apiKey ? { type, apiKey, endpoint } : undefined });
   });
 
 await program.parseAsync();

@@ -39,7 +39,7 @@ function toOpenAI(m: Message): OpenAI.ChatCompletionMessageParam[] {
   }
 }
 
-/** Chat Completions API, so it also works with OpenAI-compatible endpoints (e.g. OpenRouter via baseURL). */
+/** Chat Completions API, so it also works with OpenAI-compatible endpoints (e.g. OpenRouter via a secrets.json `endpoint`). */
 export function openaiProvider(options?: ConstructorParameters<typeof OpenAI>[0]): Provider {
   const client = new OpenAI(options);
   return {

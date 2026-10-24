@@ -3,14 +3,14 @@ import type { Image, Message, Plugin, Tool, ToolCall, ToolResult } from "./llm.t
 import { loadPlugins } from "./plugins.ts";
 import { loadSecrets } from "./secrets.ts";
 
-/** Models of every provider that has an API key set. */
+/** Models of every provider in secrets.json whose type is a known plugin provider. */
 export async function listModels() {
   const [{ providers }, secrets] = await Promise.all([loadPlugins(), loadSecrets()]);
   const lists = await Promise.all(
-    Object.entries(providers).map(async ([name, def]) => {
-      const apiKey = secrets[name]?.apiKey;
-      if (!apiKey) return [];
-      return (await def.create(apiKey).listModels()).map((id) => ({ provider: name, id }));
+    Object.entries(secrets).map(async ([name, secret]) => {
+      const def = secret && providers[secret.type];
+      if (!secret || !def) return [];
+      return (await def.create(secret).listModels()).map((id) => ({ provider: name, id }));
     }),
   );
   return lists.flat();
@@ -51,12 +51,12 @@ export async function createAgent(plugin?: Plugin) {
   async function run(history: Message[], opts: RunOptions = {}): Promise<void> {
     const name = opts.provider ?? config.provider;
     if (!name) throw new Error("No provider selected. Run: phi config set-provider <provider>");
-    const def = providers[name];
-    if (!def) throw new Error(`Unknown provider: ${name} (${Object.keys(providers).join(", ")})`);
     // read per run so a key set mid-session applies; explicit so the SDKs never fall back to their env vars
-    const apiKey = (await loadSecrets())[name]?.apiKey;
-    if (!apiKey) throw new Error(`No API key for ${name}. Run: phi config set-key ${name}`);
-    const provider = def.create(apiKey);
+    const secret = (await loadSecrets())[name];
+    if (!secret) throw new Error(`No API key for ${name}. Run: phi config set-key ${name}`);
+    const def = providers[secret.type];
+    if (!def) throw new Error(`Unknown provider type: ${secret.type} (${Object.keys(providers).join(", ")})`);
+    const provider = def.create(secret);
     // config.model belongs to config.provider, so it doesn't carry over to another provider
     const model = opts.model ?? (name === config.provider ? config.model : undefined) ?? def.defaultModel;
 

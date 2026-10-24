@@ -3,15 +3,18 @@ import { join } from "node:path";
 import * as z from "zod";
 import { PHI_DIR } from "./config.ts";
 
-const ApiKeySchema = z
+const SecretSchema = z
   .object({
+    /** name of a plugin provider, e.g. "openai" */
+    type: z.string(),
     apiKey: z.string(),
-    expires: z.string().optional(),
+    /** base URL override, e.g. "https://openrouter.ai/api/v1" */
+    endpoint: z.string().optional(),
   })
   .optional();
 
-// keyed by provider name
-export const SecretsSchema = z.record(z.string(), ApiKeySchema);
+// keyed by the name users select with set-provider / /provider, e.g. { openrouter: { type: "openai", ... } }
+export const SecretsSchema = z.record(z.string(), SecretSchema);
 export type Secrets = z.infer<typeof SecretsSchema>;
 
 export async function loadSecrets(): Promise<Secrets> {

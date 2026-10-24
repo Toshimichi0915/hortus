@@ -61,7 +61,7 @@ export interface Provider {
 }
 
 export interface ProviderDef {
-  create: (apiKey: string) => Provider;
+  create: (secret: { apiKey: string; endpoint?: string }) => Provider;
   defaultModel: string;
 }
 
