@@ -143,13 +143,9 @@ export function App({ session, providers }: { session: Session; providers: strin
   const prompt = (
     <Box flexShrink={0} marginTop={1} borderStyle="round" borderColor={busy ? "gray" : "cyan"} paddingX={1}>
       <Text color="cyan">{"> "}</Text>
-      {busy ? (
-        <Text dimColor>thinking…</Text>
-      ) : (
-        <ScrollBox flexGrow={1} maxHeight={8} fromBottom={inScroll}>
-          <PromptInput value={input} onChange={setInput} onSubmit={submit} />
-        </ScrollBox>
-      )}
+      <ScrollBox flexGrow={1} maxHeight={8} fromBottom={inScroll}>
+        <PromptInput value={input} onChange={setInput} onSubmit={submit} />
+      </ScrollBox>
     </Box>
   );
 
