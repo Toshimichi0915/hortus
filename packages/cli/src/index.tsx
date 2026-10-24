@@ -43,7 +43,8 @@ const program = new Command("phi")
       kittyKeyboard: { mode: "auto" },
     }).waitUntilExit();
     // the alternate screen is gone on exit, so leave the conversation in normal scrollback
-    for (const e of transcript) console.log(`${e.kind === "user" ? "\n" : ""}${styles[e.kind].prefix ?? ""}${e.text}`);
+    for (const e of transcript)
+      console.log(`${e.kind !== "info" && e.kind !== "error" ? "\n" : ""}${styles[e.kind].prefix ?? ""}${e.text}`);
   });
 
 const config = program

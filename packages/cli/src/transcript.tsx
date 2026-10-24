@@ -51,7 +51,9 @@ export function toRows(entries: Entry[], width: number): Row[] {
   const rows: Row[] = [];
   for (const e of entries) {
     const block = !!styles[e.kind].backgroundColor;
-    if (e.kind === "user" || block) rows.push({ kind: "info", text: "", spans: [], cont: false });
+    // a blank row between user input, thinking, output and tool blocks
+    if (rows.length && e.kind !== "info" && e.kind !== "error")
+      rows.push({ kind: "info", text: "", spans: [], cont: false });
     // a block's header is its first non-blank line
     const head = block ? e.text.split("\n").findIndex(Boolean) : -1;
     const text = `${styles[e.kind].prefix ?? ""}${e.text}`;
