@@ -36,5 +36,18 @@ export interface Provider {
 
 export type ProviderDef = { create: (apiKey: string) => Provider; defaultModel: string };
 
+/** Payload of each event; handlers may mutate it (e.g. push to `system`). */
+export type Events = {
+  /** fired at the start of every agent run; parts are joined into the system prompt */
+  session_start: { system: string[] };
+  /** streamed assistant text delta */
+  text: string;
+  tool_call: ToolCall;
+  /** a new message to append to the history */
+  message: Message;
+};
+
+export type Handlers = { [E in keyof Events]?: (payload: Events[E]) => void | Promise<void> };
+
 /** Default export of a plugin module listed in config.plugins. */
-export type Plugin = { providers?: Record<string, ProviderDef>; tools?: Tool[] };
+export type Plugin = { providers?: Record<string, ProviderDef>; tools?: Tool[]; on?: Handlers };

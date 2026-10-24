@@ -2,10 +2,13 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { builtin } from "./builtin.ts";
 import { loadConfig, PHI_DIR } from "./config.ts";
-import type { Plugin, ProviderDef, Tool } from "./llm.ts";
+import type { Events, Plugin, ProviderDef, Tool } from "./llm.ts";
 
-/** Built-ins plus every plugin in `specs` (default: config.plugins). Later plugins override same-named providers. */
-export async function loadPlugins(specs?: string[]) {
+/**
+ * Built-ins, every plugin in `specs` (default: config.plugins), then `extra`. Later plugins override same-named
+ * providers and tools; `emit` runs every plugin's handler in that order.
+ */
+export async function loadPlugins(specs?: string[], extra: Plugin[] = []) {
   specs ??= (await loadConfig()).plugins ?? [];
   // ponytail: paths only (relative to ~/.phi); npm package names need resolving from ~/.phi/node_modules
   const loaded = await Promise.all(
@@ -17,9 +20,12 @@ export async function loadPlugins(specs?: string[]) {
       }
     }),
   );
-  const plugins = [builtin, ...loaded];
+  const plugins = [builtin, ...loaded, ...extra];
   const providers: Record<string, ProviderDef> = Object.assign({}, ...plugins.map((p) => p.providers));
   // later plugins win, so a tool can be replaced by name
   const tools = new Map<string, Tool>(plugins.flatMap((p) => (p.tools ?? []).map((t) => [t.name, t])));
-  return { providers, tools: [...tools.values()] };
+  const emit = async <E extends keyof Events>(event: E, payload: Events[E]) => {
+    for (const p of plugins) await p.on?.[event]?.(payload);
+  };
+  return { providers, tools: [...tools.values()], emit };
 }

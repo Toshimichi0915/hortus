@@ -9,8 +9,15 @@ import { openrouterProvider } from "./providers/openrouter.ts";
 
 const sh = promisify(exec);
 
-/** Providers and tools that ship with phi; loaded before any configured plugin. */
+/** Providers, tools and the base system prompt that ship with phi; loaded before any configured plugin. */
 export const builtin: Plugin = {
+  on: {
+    session_start: ({ system }) => {
+      system.push(
+        `You are a coding agent. Working directory: ${process.cwd()}. Use tools to inspect and change files.`,
+      );
+    },
+  },
   providers: {
     openrouter: { create: (apiKey) => openrouterProvider({ apiKey }), defaultModel: "anthropic/claude-sonnet-5.5" },
     openai: { create: (apiKey) => openaiProvider({ apiKey }), defaultModel: "gpt-5" },

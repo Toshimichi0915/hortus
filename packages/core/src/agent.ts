@@ -1,23 +1,7 @@
 import { loadConfig } from "./config.ts";
-import type { Message, Tool, ToolCall, ToolResult } from "./llm.ts";
+import type { Message, Plugin, Tool, ToolCall, ToolResult } from "./llm.ts";
 import { loadPlugins } from "./plugins.ts";
 import { loadSecrets } from "./secrets.ts";
-
-// resolved per run (not at import) so `phi config` works before a key is set, and config edits apply without restart
-async function resolveProvider(model?: string, providerOverride?: string) {
-  const config = await loadConfig();
-  const { providers, tools } = await loadPlugins(config.plugins ?? []);
-  const name = providerOverride ?? config.provider;
-  if (!name) throw new Error("No provider selected. Run: phi config set-provider <provider>");
-  const def = providers[name];
-  if (!def) throw new Error(`Unknown provider: ${name} (${Object.keys(providers).join(", ")})`);
-  // explicit key so the SDKs never fall back to their env vars
-  const apiKey = (await loadSecrets())[name]?.apiKey;
-  if (!apiKey) throw new Error(`No API key for ${name}. Run: phi config set-key ${name}`);
-  // config.model belongs to config.provider, so it doesn't carry over to another provider
-  const resolved = model ?? (name === config.provider ? config.model : undefined) ?? def.defaultModel;
-  return { provider: def.create(apiKey), model: resolved, tools };
-}
 
 /** Models of every provider that has an API key set. */
 export async function listModels() {
@@ -32,7 +16,6 @@ export async function listModels() {
   return lists.flat();
 }
 
-const system = `You are a coding agent. Working directory: ${process.cwd()}. Use tools to inspect and change files.`;
 const maxSteps = 50;
 
 async function runTool(tools: Tool[], call: ToolCall): Promise<ToolResult> {
@@ -48,32 +31,50 @@ async function runTool(tools: Tool[], call: ToolCall): Promise<ToolResult> {
   }
 }
 
-export type AgentEvent =
-  | { type: "tool-call"; call: ToolCall }
-  /** a new message to append to the history */
-  | { type: "message"; message: Message };
+export type RunOptions = { model?: string; provider?: string };
 
-/** Runs the tool loop on top of `history` until the model stops calling tools. `model` overrides the config. */
-export async function* runAgent(
-  history: Message[],
-  onText: (text: string) => void,
-  modelOverride?: string,
-  providerOverride?: string,
-): AsyncGenerator<AgentEvent> {
-  const { provider, model, tools } = await resolveProvider(modelOverride, providerOverride);
-  const messages = [...history];
-  for (let step = 0; step < maxSteps; step++) {
-    const assistant = await provider.complete({ model, system, messages, tools }, onText);
-    messages.push(assistant);
-    yield { type: "message", message: assistant };
-    if (!assistant.toolCalls.length) return;
+/**
+ * Loads config and plugins once (built-ins, config.plugins, then `plugin`). `run` reports progress as events
+ * (`text`, `tool_call`, `message`) to every plugin, so `plugin` is how a caller observes a run.
+ */
+export async function createAgent(plugin?: Plugin) {
+  const config = await loadConfig();
+  const { providers, tools, emit } = await loadPlugins(config.plugins ?? [], plugin ? [plugin] : []);
 
-    for (const call of assistant.toolCalls) yield { type: "tool-call", call };
-    const results: Message = {
-      role: "tool",
-      results: await Promise.all(assistant.toolCalls.map((c) => runTool(tools, c))),
-    };
-    messages.push(results);
-    yield { type: "message", message: results };
+  /** Runs the tool loop on top of `history` until the model stops calling tools. `model`/`provider` override the config. */
+  async function run(history: Message[], opts: RunOptions = {}): Promise<void> {
+    const name = opts.provider ?? config.provider;
+    if (!name) throw new Error("No provider selected. Run: phi config set-provider <provider>");
+    const def = providers[name];
+    if (!def) throw new Error(`Unknown provider: ${name} (${Object.keys(providers).join(", ")})`);
+    // read per run so a key set mid-session applies; explicit so the SDKs never fall back to their env vars
+    const apiKey = (await loadSecrets())[name]?.apiKey;
+    if (!apiKey) throw new Error(`No API key for ${name}. Run: phi config set-key ${name}`);
+    const provider = def.create(apiKey);
+    // config.model belongs to config.provider, so it doesn't carry over to another provider
+    const model = opts.model ?? (name === config.provider ? config.model : undefined) ?? def.defaultModel;
+
+    const start = { system: [] as string[] };
+    await emit("session_start", start);
+    const system = start.system.join("\n\n");
+    const messages = [...history];
+    for (let step = 0; step < maxSteps; step++) {
+      const assistant = await provider.complete({ model, system, messages, tools }, (text) => void emit("text", text));
+      messages.push(assistant);
+      await emit("message", assistant);
+      if (!assistant.toolCalls.length) return;
+
+      for (const call of assistant.toolCalls) await emit("tool_call", call);
+      const results: Message = {
+        role: "tool",
+        results: await Promise.all(assistant.toolCalls.map((c) => runTool(tools, c))),
+      };
+      messages.push(results);
+      await emit("message", results);
+    }
   }
+
+  return { providers, run };
 }
+
+export type Agent = Awaited<ReturnType<typeof createAgent>>;

@@ -1,4 +1,4 @@
-import { type Message, runAgent, type Session } from "@phi/core";
+import { type Agent, createAgent, type Message, type Session } from "@phi/core";
 import { Box, type BoxProps, type DOMElement, Text, useApp, useBoxMetrics, useInput, useWindowSize } from "ink";
 import { type ReactNode, useRef, useState } from "react";
 import { type Entry, entry } from "./entry.ts";
@@ -56,6 +56,9 @@ export function App({ session, providers }: { session: Session; providers: strin
   });
 
   const push = (...e: Entry[]) => setEntries((prev) => [...prev, ...e]);
+  // the agent outlives a turn, so its handlers write to the current turn through a ref
+  const cur = useRef({ text: "", turn: [] as Message[] });
+  const agent = useRef<Promise<Agent>>(null);
 
   async function submit(value: string) {
     if (!value.trim() || busy) return;
@@ -79,30 +82,33 @@ export function App({ session, providers }: { session: Session; providers: strin
     setBusy(true);
     push(entry("user", value));
     const turn: Message[] = [{ role: "user", content: value }];
-    let text = "";
+    cur.current = { text: "", turn };
     try {
-      for await (const event of runAgent(
-        [...session.messages, ...turn],
-        (delta) => {
-          text += delta;
-          setLive(text);
+      // created on first submit so a plugin load error is reported like any other
+      agent.current ??= createAgent({
+        on: {
+          text: (delta) => {
+            cur.current.text += delta;
+            setLive(cur.current.text);
+          },
+          tool_call: (call) => push(entry("tool", `[${call.name}] ${JSON.stringify(call.input)}`)),
+          message: (message) => {
+            // an assistant message closes the streamed text
+            if (message.role === "assistant" && cur.current.text) push(entry("assistant", cur.current.text));
+            cur.current.text = "";
+            setLive("");
+            cur.current.turn.push(message);
+          },
         },
-        session.model,
-        session.provider,
-      )) {
-        if (event.type === "tool-call") push(entry("tool", `[${event.call.name}] ${JSON.stringify(event.call.input)}`));
-        else {
-          // an assistant message closes the streamed text
-          if (event.message.role === "assistant" && text) push(entry("assistant", text));
-          text = "";
-          setLive("");
-          turn.push(event.message);
-        }
-      }
+      });
+      await (await agent.current).run([...session.messages, ...turn], {
+        model: session.model,
+        provider: session.provider,
+      });
       session.messages.push(...turn);
       await session.append(turn);
     } catch (e) {
-      if (text) push(entry("assistant", text));
+      if (cur.current.text) push(entry("assistant", cur.current.text));
       setLive("");
       push(entry("error", e instanceof Error ? e.message : String(e)));
     }

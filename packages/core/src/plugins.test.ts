@@ -12,9 +12,17 @@ test("loadPlugins merges plugins over the built-ins", async () => {
     `export default {
       providers: { fake: { create: () => ({}), defaultModel: "m" } },
       tools: [{ name: "read", description: "override", inputSchema: null, execute: async () => "" }],
+      on: { session_start: ({ system }) => { system.push("from file"); } },
     };`,
   );
-  const { providers, tools } = await loadPlugins([path]);
+  const { providers, tools, emit } = await loadPlugins(
+    [path],
+    [{ on: { session_start: (s) => void s.system.push("extra") } }],
+  );
+  const start = { system: [] as string[] };
+  await emit("session_start", start);
+  assert.deepEqual(start.system.slice(1), ["from file", "extra"]);
+  assert.match(start.system[0] ?? "", /coding agent/);
   assert.deepEqual(Object.keys(providers), ["openrouter", "openai", "anthropic", "fake"]);
   assert.equal(tools.filter((t) => t.name === "read").length, 1);
   assert.equal(tools.find((t) => t.name === "read")?.description, "override");
