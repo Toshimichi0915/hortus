@@ -41,23 +41,48 @@ export async function createCli(
     busy: false,
   }));
   const push = (...e: Entry[]) => ui.setState((s) => ({ entries: [...s.entries, ...e] }));
+  // Deltas reach `live` at most once a frame: every store change renders synchronously (useSyncExternalStore), and a
+  // fast stream of back-to-back sync renders trips React's nested-update limit while Ink's useBoxMetrics has updates
+  // pending.
+  let pending = { thinking: "", text: "" };
+  let timer: NodeJS.Timeout | undefined;
+  const take = () => {
+    clearTimeout(timer);
+    timer = undefined;
+    const p = pending;
+    pending = { thinking: "", text: "" };
+    return p;
+  };
+  const stream = (key: "thinking" | "text", delta: string) => {
+    pending[key] += delta;
+    timer ??= setTimeout(() => {
+      const p = take();
+      ui.setState(({ live }) => ({ live: { thinking: live.thinking + p.thinking, text: live.text + p.text } }));
+    }, 1000 / 30);
+  };
   // streamed-but-unfinished thinking and text become entries, then the live view resets
-  const flush = () =>
-    ui.setState(({ entries, live: { thinking, text } }) => ({
-      entries: [
-        ...entries,
-        ...(thinking ? [entry("thinking", thinking)] : []),
-        ...(text ? [entry("assistant", text)] : []),
-      ],
-      live: { thinking: "", text: "" },
-    }));
+  const flush = () => {
+    const p = take();
+    ui.setState(({ entries, live }) => {
+      const thinking = live.thinking + p.thinking;
+      const text = live.text + p.text;
+      return {
+        entries: [
+          ...entries,
+          ...(thinking ? [entry("thinking", thinking)] : []),
+          ...(text ? [entry("assistant", text)] : []),
+        ],
+        live: { thinking: "", text: "" },
+      };
+    });
+  };
 
   // pending tool blocks by call id, replaced by their result block when it arrives
   const calls = new Map<string, { call: ToolCall; entry: Entry }>();
   const agent = await makeAgent({
     on: {
-      thinking: (delta) => ui.setState(({ live }) => ({ live: { ...live, thinking: live.thinking + delta } })),
-      text: (delta) => ui.setState(({ live }) => ({ live: { ...live, text: live.text + delta } })),
+      thinking: (delta) => stream("thinking", delta),
+      text: (delta) => stream("text", delta),
       tool_call: (call) => {
         const e = entry("tool", formatTool(call));
         calls.set(call.id, { call, entry: e });

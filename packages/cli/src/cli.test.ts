@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import { type Agent, openSession } from "@phi/core";
+import { type Agent, openSession, type Plugin } from "@phi/core";
 import { createCli } from "./cli.ts";
 
 test("status follows the session's model and provider, and a stale resolve doesn't overwrite a newer one", async () => {
@@ -29,4 +29,29 @@ test("status follows the session's model and provider, and a stale resolve doesn
   await session.setModel("fast");
   await sleep(80);
   assert.deepEqual(cli.ui.getState().status, { name: "p1", model: "fast", window: 1000 });
+});
+
+test("streamed deltas reach the store once a frame, and none are lost when the reply ends", async () => {
+  const session = await openSession(null, await mkdtemp(join(tmpdir(), "phi-")));
+  let observer: Plugin | undefined;
+  const run = async () => {
+    for (const d of ["a", "b", "c"]) await observer?.on?.text?.(d);
+    await sleep(60);
+    await observer?.on?.text?.("d");
+    // ends the reply before the "d" frame fires
+    await observer?.on?.message?.({ role: "assistant", text: "abcd", toolCalls: [] });
+  };
+  const resolve = async () => ({ name: "p", model: "m", provider: {} });
+  const cli = await createCli(session, [], async (o) => {
+    observer = o;
+    return { plugins: [], resolve, run } as unknown as Agent;
+  });
+  const lives: string[] = [];
+  cli.ui.subscribe((s, prev) => {
+    if (s.live !== prev.live) lives.push(s.live.text);
+  });
+  assert.equal(cli.submit("hi"), true);
+  await sleep(100);
+  assert.deepEqual(lives, ["abc", ""]);
+  assert.equal(cli.ui.getState().entries.at(-1)?.text, "abcd");
 });
