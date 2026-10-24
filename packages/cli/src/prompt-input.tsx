@@ -91,16 +91,18 @@ export function PromptInput({
     rows.push(...wrapped);
   });
 
-  // the real terminal cursor sits on the caret, so the IME draws its preedit there; hidden when scrolled out of view
-  const [screen, setScreen] = useState<CursorPosition>();
+  // the real terminal cursor sits on the caret, so the IME draws its preedit there; hidden when scrolled out of view.
+  // only the box's screen position needs layout (from the last frame); the caret is placed from this render so it doesn't lag a frame
+  const [box, setBox] = useState<ReturnType<typeof screenBox>>();
   const { setCursorPosition } = useCursor();
+  const y = box && box.y + caret.row;
+  const screen: CursorPosition | undefined =
+    box && y !== undefined && y >= box.top && y < box.bottom ? { x: box.x + caret.col, y } : undefined;
   setCursorPosition(screen);
   useEffect(() => {
     if (!ref.current) return;
-    const box = screenBox(ref.current);
-    const y = box.y + caret.row;
-    const next = y >= box.top && y < box.bottom ? { x: box.x + caret.col, y } : undefined;
-    if (next?.x !== screen?.x || next?.y !== screen?.y) setScreen(next);
+    const next = screenBox(ref.current);
+    if (next.x !== box?.x || next.y !== box?.y || next.top !== box?.top || next.bottom !== box?.bottom) setBox(next);
   });
 
   return (
