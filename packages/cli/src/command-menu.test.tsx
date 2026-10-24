@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { stripVTControlCharacters } from "node:util";
 import type { Candidate, Command } from "./commands.ts";
+import { theme } from "./entry.ts";
 
-// colors (and so inverse) are off when stdout isn't a terminal; forced before ink loads chalk
-process.env.FORCE_COLOR = "1";
-const { renderToString } = await import("ink");
+// colors are off when stdout isn't a terminal; forced (truecolor, so no two theme colors collapse) before ink loads chalk
+process.env.FORCE_COLOR = "3";
+const { renderToString, Text } = await import("ink");
 const { CommandMenu, suggest } = await import("./command-menu.tsx");
 
 const run = () => {};
@@ -97,7 +98,7 @@ test("no rows without a one-line command whose candidates exist; undefined while
     assert.deepEqual(suggest(commands, input, loaded), [], input);
 });
 
-test("the menu shows five rows around the inverse selection, descriptions in a column, Loading… until known", () => {
+test("the menu shows five rows around the accent selection, descriptions in a column, Loading… until known", () => {
   const rows = Array.from({ length: 7 }, (_, i) => ({ label: `/${"c".repeat(i + 1)}`, description: "d", value: "" }));
   const lines = renderToString(<CommandMenu rows={rows} at={5} />).split("\n");
   const text = lines.map((l) => stripVTControlCharacters(l).trim());
@@ -106,9 +107,17 @@ test("the menu shows five rows around the inverse selection, descriptions in a c
     ["/ccc", "/cccc", "/ccccc", "/cccccc", "/ccccccc"],
   );
   assert.deepEqual(new Set(text.map((t) => t.indexOf("d"))), new Set([10]));
+  // the selected row, description too, in the accent color instead of dim
+  const open = (color: string) => renderToString(<Text color={color}>x</Text>).split("x")[0] ?? "";
   assert.deepEqual(
-    lines.map((l) => l.includes("\x1b[7m")),
-    [false, false, false, true, false],
+    lines.map((l) => [l.includes(open(theme.accent)), l.includes(open(theme.dim))]),
+    [
+      [false, true],
+      [false, true],
+      [false, true],
+      [true, false],
+      [false, true],
+    ],
   );
   assert.equal(stripVTControlCharacters(renderToString(<CommandMenu rows={undefined} at={0} />)).trim(), "Loading…");
 });

@@ -139,7 +139,7 @@ export function useCommandMenu(cli: Cli, input: string, setInput: (value: string
 
 const MENU_ROWS = 5;
 
-/** `rows` under the prompt, at most five, scrolled to keep the selected (inverse) one in view; undefined = loading. */
+/** `rows` under the prompt, at most five, scrolled to keep the selected (accent) one in view; undefined = loading. */
 export function CommandMenu({ rows, at }: { rows: Suggestion[] | undefined; at: number }) {
   // the session picker's window: the selection stays mid-way where it can
   const start = Math.max(0, Math.min(at - Math.floor(MENU_ROWS / 2), (rows?.length ?? 0) - MENU_ROWS));
@@ -150,18 +150,21 @@ export function CommandMenu({ rows, at }: { rows: Suggestion[] | undefined; at: 
     // under the typed text
     <Box flexShrink={0} flexDirection="column" paddingLeft={4}>
       {!rows && <Text color={theme.dim}>Loading…</Text>}
-      {shown.map((r, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional (values can repeat)
-        <Text key={i} wrap="truncate-end" inverse={start + i === at}>
-          {r.label}
-          {r.description && (
-            <Text color={theme.dim}>
-              {" ".repeat(width - stringWidth(r.label) + 2)}
-              {r.description}
-            </Text>
-          )}
-        </Text>
-      ))}
+      {shown.map((r, i) => {
+        const color = start + i === at ? theme.accent : undefined;
+        return (
+          // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional (values can repeat)
+          <Text key={i} wrap="truncate-end" color={color}>
+            {r.label}
+            {r.description && (
+              <Text color={color ?? theme.dim}>
+                {" ".repeat(width - stringWidth(r.label) + 2)}
+                {r.description}
+              </Text>
+            )}
+          </Text>
+        );
+      })}
     </Box>
   );
 }
