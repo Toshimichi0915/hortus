@@ -1,6 +1,6 @@
 import { type Agent, createAgent, type Message, type Session, type ToolCall } from "@phi/core";
 import { Box, type BoxProps, type DOMElement, Text, useApp, useBoxMetrics, useInput, useWindowSize } from "ink";
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { type Entry, entry, formatTool, theme } from "./entry.ts";
 import { PromptInput } from "./prompt-input.tsx";
 import { Transcript } from "./transcript.tsx";
@@ -28,6 +28,22 @@ function ScrollBox({ fromBottom, children, ...props }: BoxProps & { fromBottom: 
 }
 
 const clamp = (n: number) => Math.max(0, Math.min(n, 10_000));
+const k = (n: number) => `${(n / 1000).toFixed(1)}K`;
+const pct = (n: number, of: number) => (of ? `${((n / of) * 100).toFixed(1)}%` : "-");
+
+/** Totals over `messages`, context fill from the last reply, and the cache hit rate of all input. */
+function usageLine(messages: Message[], window?: number) {
+  const usages = messages.flatMap((m) => (m.role === "assistant" && m.usage ? [m.usage] : []));
+  const sum = (f: (u: (typeof usages)[number]) => number) => usages.reduce((n, u) => n + f(u), 0);
+  const input = sum((u) => u.input);
+  const last = usages.at(-1);
+  const ctx = window ? `${pct(last ? last.input + last.output : 0, window)}/${(window / 1e6).toFixed(1)}M` : "-/-";
+  const hit = pct(
+    sum((u) => u.cached),
+    input,
+  );
+  return `↑ ${k(input)} ↓ ${k(sum((u) => u.output))} ${ctx} CH ${hit}`;
+}
 
 export function App({ session, providers }: { session: Session; providers: string[] }) {
   const [entries, setEntries] = useState(() => [
@@ -42,6 +58,7 @@ export function App({ session, providers }: { session: Session; providers: strin
   // rows the input is scrolled up from its end; clamped on read by ScrollBox, so overshoot just sticks at the top
   const [inScroll, setInScroll] = useState(0);
   const [copied, setCopied] = useState<number>();
+  const [status, setStatus] = useState<{ name: string; model: string; window?: number }>();
   const { rows } = useWindowSize();
   const { exit } = useApp();
 
@@ -71,6 +88,55 @@ export function App({ session, providers }: { session: Session; providers: strin
   // pending tool blocks by call id, restyled in place when their result arrives
   const calls = useRef(new Map<string, { call: ToolCall; entry: Entry }>());
 
+  // created on first use so a plugin load error is reported like any other
+  const getAgent = () =>
+    (agent.current ??= createAgent({
+      on: {
+        thinking: (delta) => {
+          cur.current.thinking += delta;
+          setLive({ ...cur.current });
+        },
+        text: (delta) => {
+          cur.current.text += delta;
+          setLive({ ...cur.current });
+        },
+        tool_call: (call) => {
+          const e = entry("tool", formatTool(call));
+          calls.current.set(call.id, { call, entry: e });
+          push(e);
+        },
+        message: (message) => {
+          if (message.role === "tool") {
+            for (const r of message.results) {
+              const c = calls.current.get(r.id);
+              if (!c) continue;
+              // mutated, not replaced, so the exit transcript sees the result too
+              c.entry.kind = r.isError ? "toolError" : "toolOk";
+              c.entry.text = formatTool(c.call, r);
+              calls.current.delete(r.id);
+            }
+            setEntries((prev) => [...prev]);
+          }
+          // an assistant message closes the streamed thinking and text
+          flush();
+          cur.current.turn.push(message);
+        },
+      },
+    }));
+
+  // resolved again whenever /model or /provider changes the session's choice
+  // biome-ignore lint/correctness/useExhaustiveDependencies: getAgent creates the agent once, through a ref
+  useEffect(() => {
+    getAgent()
+      .then((a) => a.resolve({ model: session.model, provider: session.provider }))
+      .then(async ({ name, model, provider }) => {
+        setStatus({ name, model });
+        const window = await provider.contextWindow?.(model).catch(() => undefined);
+        setStatus({ name, model, window });
+      })
+      .catch(() => setStatus(undefined));
+  }, [session.model, session.provider]);
+
   async function submit(value: string) {
     if (!value.trim() || busy) return;
     setInput("");
@@ -98,41 +164,7 @@ export function App({ session, providers }: { session: Session; providers: strin
     const abort = new AbortController();
     aborter.current = abort;
     try {
-      // created on first submit so a plugin load error is reported like any other
-      agent.current ??= createAgent({
-        on: {
-          thinking: (delta) => {
-            cur.current.thinking += delta;
-            setLive({ ...cur.current });
-          },
-          text: (delta) => {
-            cur.current.text += delta;
-            setLive({ ...cur.current });
-          },
-          tool_call: (call) => {
-            const e = entry("tool", formatTool(call));
-            calls.current.set(call.id, { call, entry: e });
-            push(e);
-          },
-          message: (message) => {
-            if (message.role === "tool") {
-              for (const r of message.results) {
-                const c = calls.current.get(r.id);
-                if (!c) continue;
-                // mutated, not replaced, so the exit transcript sees the result too
-                c.entry.kind = r.isError ? "toolError" : "toolOk";
-                c.entry.text = formatTool(c.call, r);
-                calls.current.delete(r.id);
-              }
-              setEntries((prev) => [...prev]);
-            }
-            // an assistant message closes the streamed thinking and text
-            flush();
-            cur.current.turn.push(message);
-          },
-        },
-      });
-      await (await agent.current)
+      await (await getAgent())
         .run([...session.messages, ...turn], { model: session.model, provider: session.provider, signal: abort.signal })
         .catch((e) => {
           if (!abort.signal.aborted) throw e;
@@ -144,6 +176,8 @@ export function App({ session, providers }: { session: Session; providers: strin
         push(entry("error", "\nInterrupted"));
       }
       session.messages.push(...turn);
+      // now counted through session.messages
+      cur.current.turn = [];
       await session.append(turn);
     } catch (e) {
       flush();
@@ -179,11 +213,16 @@ export function App({ session, providers }: { session: Session; providers: strin
         onCopy={setCopied}
       />
       {prompt}
-      <Text color={theme.dim} wrap="truncate">
-        {copied === undefined
-          ? "Wheel/PgUp/PgDn scroll · ↑/↓ input · Shift+Enter newline · Esc interrupt · Ctrl+C clear · Ctrl+D quit"
-          : `Copied ${copied} chars`}
-      </Text>
+      <Box justifyContent="space-between">
+        <Text color={theme.dim} wrap="truncate">
+          {copied === undefined
+            ? usageLine([...session.messages, ...cur.current.turn], status?.window)
+            : `Copied ${copied} chars`}
+        </Text>
+        <Text color={theme.dim} wrap="truncate">
+          {status && `(${status.name}) ${status.model}`}
+        </Text>
+      </Box>
     </Box>
   );
 }

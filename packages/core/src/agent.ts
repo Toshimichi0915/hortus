@@ -47,8 +47,8 @@ export async function createAgent(plugin?: Plugin) {
   const config = await loadConfig();
   const { providers, tools, emit } = await loadPlugins(undefined, plugin ? [plugin] : []);
 
-  /** Runs the tool loop on top of `history` until the model stops calling tools. `model`/`provider` override the config. */
-  async function run(history: Message[], opts: RunOptions = {}): Promise<void> {
+  /** Provider name, model and provider instance a run with `opts` would use; throws if any is missing. */
+  async function resolve(opts: Pick<RunOptions, "model" | "provider"> = {}) {
     const name = opts.provider ?? config.provider;
     if (!name) throw new Error("No provider selected. Run: phi config set-provider <provider>");
     // read per run so a key set mid-session applies; explicit so the SDKs never fall back to their env vars
@@ -60,7 +60,12 @@ export async function createAgent(plugin?: Plugin) {
     // config.model belongs to config.provider, so it doesn't carry over to another provider
     const model = opts.model ?? (name === config.provider ? config.model : undefined);
     if (!model) throw new Error("No model selected. Run: phi config set-model <model>");
+    return { name, model, provider };
+  }
 
+  /** Runs the tool loop on top of `history` until the model stops calling tools. `model`/`provider` override the config. */
+  async function run(history: Message[], opts: RunOptions = {}): Promise<void> {
+    const { model, provider } = await resolve(opts);
     const start = { system: [] as string[] };
     await emit("session_start", start);
     const system = start.system.join("\n\n");
@@ -86,7 +91,7 @@ export async function createAgent(plugin?: Plugin) {
     }
   }
 
-  return { providers, run };
+  return { providers, resolve, run };
 }
 
 export type Agent = Awaited<ReturnType<typeof createAgent>>;

@@ -18,10 +18,23 @@ export interface ToolResult {
   isError?: boolean;
 }
 
+/** Token counts of one completion; `input` includes `cached`. */
+export interface Usage {
+  input: number;
+  output: number;
+  cached: number;
+}
+
 export type Message =
   | { role: "user"; content: string }
   // raw: provider-native content replayed as-is to the same provider (e.g. Anthropic thinking blocks)
-  | { role: "assistant"; text: string; toolCalls: ToolCall[]; raw?: { provider: string; content: unknown } }
+  | {
+      role: "assistant";
+      text: string;
+      toolCalls: ToolCall[];
+      raw?: { provider: string; content: unknown };
+      usage?: Usage;
+    }
   | { role: "tool"; results: ToolResult[] };
 
 export type AssistantMessage = Extract<Message, { role: "assistant" }>;
@@ -58,6 +71,8 @@ export interface Provider {
   ): Promise<AssistantMessage>;
   /** Model ids usable as CompletionRequest.model. */
   listModels(): Promise<string[]>;
+  /** Input context window of `model` in tokens, when the API reports it. */
+  contextWindow?(model: string): Promise<number | undefined>;
 }
 
 export interface ProviderDef {

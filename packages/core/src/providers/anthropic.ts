@@ -55,6 +55,9 @@ export function anthropicProvider(options?: ConstructorParameters<typeof Anthrop
       for await (const m of client.models.list()) ids.push(m.id);
       return ids;
     },
+    async contextWindow(model) {
+      return (await client.models.retrieve(model)).max_input_tokens ?? undefined;
+    },
     async complete(
       { model, system, messages, tools, signal }: CompletionRequest,
       onText,
@@ -89,11 +92,17 @@ export function anthropicProvider(options?: ConstructorParameters<typeof Anthrop
         throw new Error("Tool input truncated by max_tokens");
       if (message.stop_reason === "refusal")
         throw new Error(`Model refused: ${message.stop_details?.explanation ?? "no details"}`);
+      const { input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens } = message.usage;
       return {
         role: "assistant",
         text: message.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(""),
         toolCalls,
         raw: { provider: "anthropic", content: message.content },
+        usage: {
+          input: input_tokens + (cache_read_input_tokens ?? 0) + (cache_creation_input_tokens ?? 0),
+          output: output_tokens,
+          cached: cache_read_input_tokens ?? 0,
+        },
       };
     },
   };

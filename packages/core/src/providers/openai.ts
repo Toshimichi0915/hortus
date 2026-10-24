@@ -48,6 +48,11 @@ export function openaiProvider(options?: ConstructorParameters<typeof OpenAI>[0]
       for await (const m of client.models.list()) ids.push(m.id);
       return ids;
     },
+    async contextWindow(model) {
+      // `context_length` is OpenRouter's extension; OpenAI's model list doesn't report it
+      for await (const m of client.models.list())
+        if (m.id === model) return (m as { context_length?: number }).context_length;
+    },
     async complete(
       { model, system, messages, tools, signal }: CompletionRequest,
       onText,
@@ -61,6 +66,7 @@ export function openaiProvider(options?: ConstructorParameters<typeof OpenAI>[0]
             type: "function",
             function: { name: t.name, description: t.description, parameters: z.toJSONSchema(t.inputSchema) },
           })),
+          stream_options: { include_usage: true },
         },
         { signal },
       );
@@ -71,9 +77,15 @@ export function openaiProvider(options?: ConstructorParameters<typeof OpenAI>[0]
         if (reasoning) onThinking(reasoning);
         if (delta?.content) onText(delta.content);
       }
-      const message = (await stream.finalChatCompletion()).choices[0]?.message;
+      const { choices, usage } = await stream.finalChatCompletion();
+      const message = choices[0]?.message;
       return {
         role: "assistant",
+        usage: usage && {
+          input: usage.prompt_tokens,
+          output: usage.completion_tokens,
+          cached: usage.prompt_tokens_details?.cached_tokens ?? 0,
+        },
         text: message?.content ?? "",
         toolCalls: (message?.tool_calls ?? []).flatMap((c) => {
           if (c.type !== "function") return [];
