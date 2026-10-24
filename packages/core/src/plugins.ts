@@ -28,6 +28,14 @@ export interface Manifest extends z.infer<typeof ManifestSchema> {
   dir: string;
 }
 
+/** Options shared by everything that loads plugins (`loadPlugins`, `createAgent`, `listModels`). */
+export interface LoadOptions {
+  /** names the host provides itself, e.g. `{ "@phi/cli": "0.1.0" }`; plugins depend on them like on any plugin */
+  provided?: Record<string, string>;
+  /** loaded after every plugin, e.g. a caller observing a run */
+  extra?: Plugin[];
+}
+
 /** Every `<dir>/<name>/phi.json`; directories without one are skipped. */
 async function readManifests(dir: string): Promise<Manifest[]> {
   let names: string[];
@@ -58,14 +66,15 @@ async function readManifests(dir: string): Promise<Manifest[]> {
 }
 
 /**
- * Dependencies first. Missing optional dependencies are ignored; missing required ones, version mismatches (optional
- * included) and cycles throw.
+ * Dependencies first. `provided` names satisfy dependencies (version-checked) without being loaded. Missing optional
+ * dependencies are ignored; missing required ones, version mismatches (optional included) and cycles throw.
  */
-export function sortManifests(manifests: Manifest[]): Manifest[] {
+export function sortManifests(manifests: Manifest[], provided: Record<string, string> = {}): Manifest[] {
   const byName = new Map<string, Manifest>();
   for (const m of manifests) {
     const dup = byName.get(m.name);
     if (dup) throw new Error(`Duplicate plugin ${m.name} in ${dup.dir} and ${m.dir}`);
+    if (Object.hasOwn(provided, m.name)) throw new Error(`Duplicate plugin ${m.name} in ${m.dir}: phi provides it`);
     byName.set(m.name, m);
   }
   const sorted: Manifest[] = [];
@@ -79,14 +88,16 @@ export function sortManifests(manifests: Manifest[]): Manifest[] {
     ];
     for (const { name, range, optional } of deps) {
       const d = byName.get(name);
-      if (!d) {
+      // hasOwn, so a dependency named like an Object.prototype key isn't "provided"
+      const version = d?.version ?? (Object.hasOwn(provided, name) ? provided[name] : undefined);
+      if (version === undefined) {
         if (optional) continue;
         throw new Error(`Plugin ${m.name} requires missing plugin ${name}@${range}`);
       }
-      if (!semver.satisfies(d.version, range)) {
-        throw new Error(`Plugin ${m.name} requires ${name}@${range}, found ${d.version}`);
+      if (!semver.satisfies(version, range)) {
+        throw new Error(`Plugin ${m.name} requires ${name}@${range}, found ${version}`);
       }
-      visit(d, [...chain, m.name]);
+      if (d) visit(d, [...chain, m.name]);
     }
     done.add(m.name);
     sorted.push(m);
@@ -97,10 +108,11 @@ export function sortManifests(manifests: Manifest[]): Manifest[] {
 
 /**
  * Built-ins, every plugin in `dir` (dependencies first), then `extra`. Later plugins override same-named providers
- * and tools; `emit` runs every plugin's handler in that order.
+ * and tools; `emit` runs every plugin's handler in that order. `plugins` lists them in that order too, for hosts that
+ * read keys of their own (the CLI's `cli`).
  */
-export async function loadPlugins(dir = PLUGINS_DIR, extra: Plugin[] = []) {
-  const manifests = sortManifests(await readManifests(dir));
+export async function loadPlugins(dir = PLUGINS_DIR, { provided, extra = [] }: LoadOptions = {}) {
+  const manifests = sortManifests(await readManifests(dir), provided);
   const loaded = await Promise.all(
     manifests.map(async (m): Promise<Plugin> => {
       try {
@@ -117,5 +129,5 @@ export async function loadPlugins(dir = PLUGINS_DIR, extra: Plugin[] = []) {
   const emit = async <E extends keyof Events>(event: E, payload: Events[E]) => {
     for (const p of plugins) await p.on?.[event]?.(payload);
   };
-  return { providers, tools: [...tools.values()], emit };
+  return { providers, tools: [...tools.values()], emit, plugins };
 }

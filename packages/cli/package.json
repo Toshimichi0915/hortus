@@ -2,12 +2,22 @@
   "name": "@phi/cli",
   "version": "0.1.0",
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/api.d.ts",
+      "default": "./dist/api.js"
+    }
+  },
+  "engines": {
+    "node": ">=22.15"
+  },
   "dependencies": {
     "@phi/core": "workspace:*",
     "commander": "^15.0.0",
     "ink": "^8.0.0",
     "react": "^19.3.0",
-    "string-width": "^8.3.0"
+    "string-width": "^8.3.0",
+    "zustand": "^5.0.16"
   },
   "devDependencies": {
     "@types/react": "^19.3.0"

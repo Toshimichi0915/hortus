@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
-import { branch, type SessionEntry } from "./session.ts";
+import { branch, openSession, type SessionEntry, type SessionState } from "./session.ts";
 
 test("branch walks from the leaf to the root, skipping sibling branches", () => {
   const e = (id: string, parentId: string | null): SessionEntry => ({
@@ -48,4 +51,26 @@ test("branch restores model and provider together from the model line", () => {
   ];
   assert.deepEqual(branch(entries, "p2"), { messages: [], model: undefined, provider: "anthropic" });
   assert.deepEqual(branch(entries, "p1"), { messages: [], model: "gpt-5", provider: "openai" });
+});
+
+test("session changes reach subscribers with the previous state, and the file replays to the same state", async () => {
+  const session = await openSession(null, await mkdtemp(join(tmpdir(), "phi-")));
+  const seen: [SessionState, SessionState][] = [];
+  session.subscribe((state, prev) => void seen.push([state, prev]));
+  await session.setModel("m");
+  await session.append([{ role: "user", content: "hi" }]);
+  await session.setProvider("p");
+  assert.deepEqual(
+    seen.map(([s, prev]) => [prev.model, s.model, prev.messages.length, s.messages.length, s.provider]),
+    [
+      [undefined, "m", 0, 0, undefined],
+      ["m", "m", 0, 1, undefined],
+      ["m", "m", 1, 1, "p"],
+    ],
+  );
+  const entries = (await readFile(session.path, "utf8"))
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as SessionEntry);
+  assert.deepEqual(branch(entries, session.leafId ?? ""), session.getState());
 });

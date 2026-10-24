@@ -1,4 +1,4 @@
-import type { ToolCall, ToolResult } from "@phi/core";
+import type { Message, ToolCall, ToolResult } from "@phi/core";
 
 export interface Entry {
   id: number;
@@ -6,14 +6,9 @@ export interface Entry {
   text: string;
 }
 
-/** Every entry ever shown, so fullscreen mode can print the conversation to normal scrollback on exit. */
-export const transcript: Entry[] = [];
-
 let nextId = 0;
 export function entry(kind: Entry["kind"], text: string): Entry {
-  const e = { id: nextId++, kind, text };
-  transcript.push(e);
-  return e;
+  return { id: nextId++, kind, text };
 }
 
 interface Style {
@@ -92,4 +87,21 @@ export function formatTool(call: ToolCall, result?: ToolResult): string {
   }
   // blank rows pad the block's background above and below, as pi does
   return ["", head, ...(body.length ? ["", ...body] : []), ""].join("\n");
+}
+
+const k = (n: number) => `${(n / 1000).toFixed(1)}K`;
+const pct = (n: number, of: number) => (of ? `${((n / of) * 100).toFixed(1)}%` : "-");
+
+/** Totals over `messages`, context fill from the last reply, and the cache hit rate of all input. */
+export function usageLine(messages: Message[], window?: number) {
+  const usages = messages.flatMap((m) => (m.role === "assistant" && m.usage ? [m.usage] : []));
+  const sum = (f: (u: (typeof usages)[number]) => number) => usages.reduce((n, u) => n + f(u), 0);
+  const input = sum((u) => u.input);
+  const last = usages.at(-1);
+  const ctx = window ? `${pct(last ? last.input + last.output : 0, window)}/${(window / 1e6).toFixed(1)}M` : "-/-";
+  const hit = pct(
+    sum((u) => u.cached),
+    input,
+  );
+  return `↑ ${k(input)} ↓ ${k(sum((u) => u.output))} ${ctx} CH ${hit}`;
 }

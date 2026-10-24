@@ -38,9 +38,8 @@ test("loadPlugins merges plugins over the built-ins, dependencies first", async 
     };`,
   );
   await mkdir(join(dir, "not-a-plugin"));
-  const { providers, tools, emit } = await loadPlugins(dir, [
-    { on: { session_start: (s) => void s.system.push("extra") } },
-  ]);
+  const extra = { on: { session_start: (s: { system: string[] }) => void s.system.push("extra") } };
+  const { providers, tools, emit, plugins } = await loadPlugins(dir, { extra: [extra] });
   const start = { system: [] as string[] };
   await emit("session_start", start);
   assert.deepEqual(start.system.slice(1), ["from b", "from a", "extra"]);
@@ -48,6 +47,8 @@ test("loadPlugins merges plugins over the built-ins, dependencies first", async 
   assert.deepEqual(Object.keys(providers), ["openai", "anthropic", "fake"]);
   assert.equal(tools.filter((t) => t.name === "read").length, 1);
   assert.equal(tools.find((t) => t.name === "read")?.description, "override");
+  assert.equal(plugins.length, 4);
+  assert.equal(plugins.at(-1), extra);
   const empty = await loadPlugins(join(dir, "nonexistent"));
   assert.deepEqual(Object.keys(empty.providers), ["openai", "anthropic"]);
 
@@ -75,4 +76,15 @@ test("sortManifests checks version ranges and rejects missing dependencies, cycl
   );
   assert.throws(() => sortManifests([m("a", { b: "*" }), m("b", { a: "*" })]), /cycle: a -> b -> a/);
   assert.throws(() => sortManifests([m("a"), m("a")]), /Duplicate plugin a/);
+  // names the host provides satisfy dependencies, version-checked, without being loaded
+  assert.deepEqual(
+    sortManifests([m("a", { host: "^1.0.0" })], { host: "1.5.0" }).map((x) => x.name),
+    ["a"],
+  );
+  assert.throws(
+    () => sortManifests([m("a", { host: "^2.0.0" })], { host: "1.5.0" }),
+    /a requires host@\^2\.0\.0, found 1\.5\.0/,
+  );
+  assert.throws(() => sortManifests([m("host")], { host: "1.5.0" }), /Duplicate plugin host in host: phi provides it/);
+  assert.throws(() => sortManifests([m("a", { toString: "*" })]), /a requires missing plugin toString@\*/);
 });

@@ -1,11 +1,11 @@
 import { loadConfig } from "./config.ts";
-import type { Image, Message, Plugin, Tool, ToolCall, ToolResult } from "./llm.ts";
-import { loadPlugins } from "./plugins.ts";
+import type { Image, Message, Tool, ToolCall, ToolResult } from "./llm.ts";
+import { type LoadOptions, loadPlugins } from "./plugins.ts";
 import { loadSecrets } from "./secrets.ts";
 
 /** Models of every provider in secrets.json whose type is a known plugin provider. */
-export async function listModels() {
-  const [{ providers }, secrets] = await Promise.all([loadPlugins(), loadSecrets()]);
+export async function listModels(opts?: LoadOptions) {
+  const [{ providers }, secrets] = await Promise.all([loadPlugins(undefined, opts), loadSecrets()]);
   const lists = await Promise.all(
     Object.entries(secrets).map(async ([name, secret]) => {
       const def = secret && providers[secret.type];
@@ -40,12 +40,12 @@ export interface RunOptions {
 }
 
 /**
- * Loads config and plugins once (built-ins, ~/.phi/plugins, then `plugin`). `run` reports progress as events
- * (`text`, `tool_call`, `message`) to every plugin, so `plugin` is how a caller observes a run.
+ * Loads config and plugins once (built-ins, ~/.phi/plugins, then `opts.extra`). `run` reports progress as events
+ * (`text`, `tool_call`, `message`) to every plugin, so a plugin in `extra` is how a caller observes a run.
  */
-export async function createAgent(plugin?: Plugin) {
+export async function createAgent(opts?: LoadOptions) {
   const config = await loadConfig();
-  const { providers, tools, emit } = await loadPlugins(undefined, plugin ? [plugin] : []);
+  const { providers, tools, emit, plugins } = await loadPlugins(undefined, opts);
 
   /** Provider name, model and provider instance a run with `opts` would use; throws if any is missing. */
   async function resolve(opts: Pick<RunOptions, "model" | "provider"> = {}) {
@@ -91,7 +91,7 @@ export async function createAgent(plugin?: Plugin) {
     }
   }
 
-  return { providers, resolve, run };
+  return { providers, plugins, resolve, run };
 }
 
 export type Agent = Awaited<ReturnType<typeof createAgent>>;

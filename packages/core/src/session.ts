@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createStore, type StoreApi } from "zustand/vanilla";
 import { PHI_DIR } from "./config.ts";
 import type { Message } from "./llm.ts";
 
@@ -22,10 +23,15 @@ export interface SessionState {
   provider?: string;
 }
 
-export interface Session extends SessionState {
+/**
+ * Read-only store of the current branch: `subscribe` reports every change along with the previous state.
+ * Changes go through the methods below, which also append to the file, so state and file never drift apart.
+ */
+export interface Session extends Pick<StoreApi<SessionState>, "getState" | "getInitialState" | "subscribe"> {
   path: string;
   /** last entry of the current branch; new entries hang off it */
   leafId: string | null;
+  /** adds to `messages` and the file */
   append(msgs: Message[]): Promise<void>;
   setModel(model: string): Promise<void>;
   setProvider(provider: string): Promise<void>;
@@ -78,22 +84,22 @@ export async function lastEntryId(sessionId: string | true) {
   return last.id;
 }
 
-/** id: entry to resume from (its session file is found by scanning), null = new session */
-export async function openSession(id: string | null): Promise<Session> {
-  await mkdir(sessionsDir, { recursive: true });
+/** id: entry to resume from (its session file is found by scanning `dir`), null = new session */
+export async function openSession(id: string | null, dir = sessionsDir): Promise<Session> {
+  await mkdir(dir, { recursive: true });
   let name = `${Math.floor(Date.now() / 1000)}_${randomUUID()}.jsonl`;
   let state: SessionState = { messages: [] };
 
   if (id !== null) {
     // epoch prefix makes lexical order chronological; newest first since recent entries are the likely target
-    const names = (await readdir(sessionsDir))
+    const names = (await readdir(dir))
       .filter((n) => n.endsWith(".jsonl"))
       .sort()
       .reverse();
     let found = false;
     // ponytail: linear scan of every session file; add an id -> file index if this gets slow
     for (const n of names) {
-      const entries = parse(await readFile(join(sessionsDir, n), "utf8"));
+      const entries = parse(await readFile(join(dir, n), "utf8"));
       if (!entries.some((e) => e.id === id)) continue;
       name = n;
       state = branch(entries, id);
@@ -103,19 +109,25 @@ export async function openSession(id: string | null): Promise<Session> {
     if (!found) throw new Error(`Entry not found: ${id}`);
   }
 
-  const path = join(sessionsDir, name);
+  const path = join(dir, name);
+  const store = createStore<SessionState>()(() => state);
   const session: Session = {
-    ...state,
+    getState: store.getState,
+    getInitialState: store.getInitialState,
+    subscribe: store.subscribe,
     path,
     leafId: id,
-    append: (msgs) => write(msgs.map((message) => ({ type: "message", message }))),
-    setModel: async (model) => {
-      session.model = model;
-      await write([{ type: "model", model, provider: session.provider }]);
+    append: (msgs) => {
+      store.setState((s) => ({ messages: [...s.messages, ...msgs] }));
+      return write(msgs.map((message) => ({ type: "message", message })));
     },
-    setProvider: async (provider) => {
-      session.provider = provider;
-      await write([{ type: "model", model: session.model, provider }]);
+    setModel: (model) => {
+      store.setState({ model });
+      return write([{ type: "model", model, provider: store.getState().provider }]);
+    },
+    setProvider: (provider) => {
+      store.setState({ provider });
+      return write([{ type: "model", model: store.getState().model, provider }]);
     },
   };
   async function write(items: EntryBody[]) {

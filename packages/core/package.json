@@ -12,7 +12,8 @@
     "@anthropic-ai/sdk": "^0.132.1",
     "openai": "^7.31.0",
     "semver": "^7.8.5",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "zustand": "^5.0.16"
   },
   "devDependencies": {
     "@types/semver": "^7.8.0"
