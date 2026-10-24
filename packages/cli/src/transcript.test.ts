@@ -32,3 +32,11 @@ test("selection joins soft-wrapped rows without newlines and real lines with the
   assert.equal(selectionText(rows, { row: 2, col: 2 }, { row: 0, col: 0 }), "aaa bbb ccc\nsec");
   assert.equal(selectionText(rows, { row: 0, col: 2 }, { row: 0, col: 99 }), "a ");
 });
+
+test("styled spans are split across wrapped rows", () => {
+  const rows = toRows([{ id: 0, kind: "assistant", text: "**aaa bbb** ccc" }], 7);
+  assert.deepEqual(
+    rows.map((r) => r.spans),
+    [[{ bold: true, text: "aaa " }], [{ bold: true, text: "bbb" }, { text: " ccc" }]],
+  );
+});

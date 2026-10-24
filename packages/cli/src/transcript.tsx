@@ -3,9 +3,13 @@ import { Box, type DOMElement, Text, useBoxMetrics, useInput, useStdin } from "i
 import { useEffect, useMemo, useRef, useState } from "react";
 import stringWidth from "string-width";
 import { type Entry, styles } from "./entry.ts";
+import { markdown, type Span } from "./markdown.ts";
 
-/** One screen row. `cont` = soft-wrapped continuation of the previous row (joined without a newline on copy). */
-export type Row = { kind: Entry["kind"]; text: string; cont: boolean; bold?: boolean };
+/**
+ * One screen row. `text` is its plain text and `spans` the same text styled.
+ * `cont` = soft-wrapped continuation of the previous row (joined without a newline on copy).
+ */
+export type Row = { kind: Entry["kind"]; text: string; spans: Span[]; cont: boolean; bold?: boolean };
 type Point = { row: number; col: number };
 
 const graphemes = (s: string) => Array.from(new Intl.Segmenter().segment(s), (g) => g.segment);
@@ -38,12 +42,17 @@ export function toRows(entries: Entry[], width: number): Row[] {
   const rows: Row[] = [];
   for (const e of entries) {
     const block = !!styles[e.kind].backgroundColor;
-    if (e.kind === "user" || block) rows.push({ kind: "info", text: "", cont: false });
+    if (e.kind === "user" || block) rows.push({ kind: "info", text: "", spans: [], cont: false });
     // a block's header is its first non-blank line
     const head = block ? e.text.split("\n").findIndex(Boolean) : -1;
-    `${styles[e.kind].prefix ?? ""}${e.text}`.split("\n").forEach((line, l) => {
-      wrap(line, Math.max(1, width)).forEach((text, i) => {
-        rows.push({ kind: e.kind, text, cont: i > 0, bold: l === head });
+    const text = `${styles[e.kind].prefix ?? ""}${e.text}`;
+    const lines = e.kind === "assistant" ? markdown(text, width) : text.split("\n").map((t) => [{ text: t }]);
+    lines.forEach((spans, l) => {
+      let col = 0;
+      wrap(spans.map((s) => s.text).join(""), Math.max(1, width)).forEach((text, i) => {
+        const w = stringWidth(text);
+        rows.push({ kind: e.kind, text, spans: cutCols(spans, col, col + w), cont: i > 0, bold: l === head });
+        col += w;
       });
     });
   }
@@ -60,6 +69,26 @@ function sliceCols(text: string, from: number, to: number) {
   }
   return out;
 }
+
+/** The parts of `spans` between columns [from, to). */
+function cutCols(spans: Span[], from: number, to: number) {
+  const out: Span[] = [];
+  let col = 0;
+  for (const s of spans) {
+    const text = sliceCols(s.text, from - col, to - col);
+    if (text) out.push({ ...s, text });
+    col += stringWidth(s.text);
+  }
+  return out;
+}
+
+const show = (spans: Span[]) =>
+  spans.map(({ text, ...style }, i) => (
+    // biome-ignore lint/suspicious/noArrayIndexKey: spans are positional
+    <Text key={i} {...style}>
+      {text}
+    </Text>
+  ));
 
 const order = (a: Point, b: Point) => (a.row < b.row || (a.row === b.row && a.col <= b.col) ? [a, b] : [b, a]);
 
@@ -181,12 +210,14 @@ export function Transcript({
           <Text key={i} wrap="truncate" bold={row.bold} {...style}>
             {cols ? (
               <>
-                {sliceCols(row.text, 0, cols[0])}
-                <Text inverse>{sliceCols(row.text, cols[0], cols[1]) || " "}</Text>
-                {sliceCols(row.text, cols[1], Number.POSITIVE_INFINITY)}
+                {show(cutCols(row.spans, 0, cols[0]))}
+                <Text inverse>{sliceCols(row.text, cols[0], cols[1]) ? show(cutCols(row.spans, ...cols)) : " "}</Text>
+                {show(cutCols(row.spans, cols[1], Number.POSITIVE_INFINITY))}
               </>
+            ) : row.text ? (
+              show(row.spans)
             ) : (
-              row.text || " "
+              " "
             )}
             {fill}
           </Text>
