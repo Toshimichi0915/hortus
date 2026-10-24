@@ -31,18 +31,14 @@ const clamp = (n: number) => Math.max(0, Math.min(n, 10_000));
 const k = (n: number) => `${(n / 1000).toFixed(1)}K`;
 const pct = (n: number, of: number) => (of ? `${((n / of) * 100).toFixed(1)}%` : "-");
 
-/** Totals over `messages`, context fill from the last reply, and the cache hit rate of all input. */
+/** Totals over `messages`, context fill from the last reply, and the cache hit rate of the last reply. */
 function usageLine(messages: Message[], window?: number) {
   const usages = messages.flatMap((m) => (m.role === "assistant" && m.usage ? [m.usage] : []));
   const sum = (f: (u: (typeof usages)[number]) => number) => usages.reduce((n, u) => n + f(u), 0);
   const input = sum((u) => u.input);
   const last = usages.at(-1);
   const ctx = window ? `${pct(last ? last.input + last.output : 0, window)}/${(window / 1e6).toFixed(1)}M` : "-/-";
-  const hit = pct(
-    sum((u) => u.cached),
-    input,
-  );
-  return `↑ ${k(input)} ↓ ${k(sum((u) => u.output))} ${ctx} CH ${hit}`;
+  return `↑ ${k(input)} ↓ ${k(sum((u) => u.output))} ${ctx} CH ${pct(last?.cached ?? 0, last?.input ?? 0)}`;
 }
 
 export function App({ session, providers }: { session: Session; providers: string[] }) {
