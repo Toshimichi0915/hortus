@@ -1,6 +1,6 @@
 import type { Plugin } from "./llm.ts";
 import { anthropicProvider } from "./providers/anthropic.ts";
-import { openaiProvider } from "./providers/openai.ts";
+import { openaiProvider, openaiResponsesProvider } from "./providers/openai.ts";
 import { bashTool, editTool, readTool, writeTool } from "./tools.ts";
 
 /** Providers, tools and the base system prompt that ship with hortus; loaded before any configured plugin. */
@@ -15,6 +15,9 @@ export const builtin: Plugin = {
   providers: {
     openai: {
       create: ({ apiKey, endpoint }) => openaiProvider({ apiKey, baseURL: endpoint }),
+    },
+    "openai-responses": {
+      create: ({ apiKey, endpoint }) => openaiResponsesProvider({ apiKey, baseURL: endpoint }),
     },
     anthropic: {
       create: ({ apiKey, endpoint }) => anthropicProvider({ apiKey, baseURL: endpoint }),

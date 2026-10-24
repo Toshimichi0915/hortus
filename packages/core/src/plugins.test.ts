@@ -44,13 +44,13 @@ test("loadPlugins merges plugins over the built-ins, dependencies first", async 
   await emit("session_start", start);
   assert.deepEqual(start.system.slice(1), ["from b", "from a", "extra"]);
   assert.match(start.system[0] ?? "", /coding agent/);
-  assert.deepEqual(Object.keys(providers), ["openai", "anthropic", "fake"]);
+  assert.deepEqual(Object.keys(providers), ["openai", "openai-responses", "anthropic", "fake"]);
   assert.equal(tools.filter((t) => t.name === "read").length, 1);
   assert.equal(tools.find((t) => t.name === "read")?.description, "override");
   assert.equal(plugins.length, 4);
   assert.equal(plugins.at(-1), extra);
   const empty = await loadPlugins(join(dir, "nonexistent"));
-  assert.deepEqual(Object.keys(empty.providers), ["openai", "anthropic"]);
+  assert.deepEqual(Object.keys(empty.providers), ["openai", "openai-responses", "anthropic"]);
 
   await writePlugin(join(dir, "c"), { name: "c", version: "1.0.0", entrypoint: "nope.mjs" }, "");
   await assert.rejects(loadPlugins(dir), /Failed to load plugin c/);

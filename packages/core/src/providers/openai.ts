@@ -89,16 +89,128 @@ export function openaiProvider(options?: ConstructorParameters<typeof OpenAI>[0]
           cached: usage.prompt_tokens_details?.cached_tokens ?? 0,
         },
         text: message?.content ?? "",
-        toolCalls: (message?.tool_calls ?? []).flatMap((c) => {
-          if (c.type !== "function") return [];
-          let input: unknown;
-          try {
-            input = JSON.parse(c.function.arguments || "{}");
-          } catch {
-            input = c.function.arguments; // fails schema validation and is reported back to the model
-          }
-          return [{ id: c.id, name: c.function.name, input }];
-        }),
+        toolCalls: (message?.tool_calls ?? []).flatMap((c) =>
+          c.type === "function"
+            ? [{ id: c.id, name: c.function.name, input: parseArguments(c.function.arguments) }]
+            : [],
+        ),
+      };
+    },
+  };
+}
+
+function parseArguments(args: string): unknown {
+  try {
+    return JSON.parse(args || "{}");
+  } catch {
+    return args; // fails schema validation and is reported back to the model
+  }
+}
+
+function toResponses(m: Message, key: string): OpenAI.Responses.ResponseInputItem[] {
+  switch (m.role) {
+    case "user":
+      return [m];
+    case "assistant":
+      if (m.raw?.provider === key) return m.raw.content as OpenAI.Responses.ResponseInputItem[];
+      return [
+        ...(m.text ? [{ role: "assistant" as const, content: m.text }] : []),
+        ...m.toolCalls.map((c) => ({
+          type: "function_call" as const,
+          call_id: c.id,
+          name: c.name,
+          arguments: JSON.stringify(c.input),
+        })),
+      ];
+    case "tool":
+      return m.results.map((r) => ({
+        type: "function_call_output" as const,
+        call_id: r.id,
+        output: r.image
+          ? [{ type: "input_image" as const, image_url: `data:${r.image.mediaType};base64,${r.image.data}` }]
+          : r.output,
+      }));
+  }
+}
+
+/** Responses API, OpenAI's newer one (some models only serve it); OpenRouter has it too. */
+export function openaiResponsesProvider(options?: ConstructorParameters<typeof OpenAI>[0]): Provider {
+  const client = new OpenAI(options);
+  return {
+    ...openaiProvider(options),
+    async complete(
+      { model, system, messages, tools, effort, signal }: CompletionRequest,
+      onText,
+      onThinking,
+    ): Promise<AssistantMessage> {
+      // raw output goes back only to the same endpoint and model: reasoning is encrypted per account, and models
+      // without reasoning reject it
+      const key = `openai-responses ${client.baseURL} ${model}`;
+      const stream = await client.responses.create(
+        {
+          model,
+          instructions: system,
+          input: messages.flatMap((m) => toResponses(m, key)),
+          tools: tools.map((t) => ({
+            type: "function",
+            name: t.name,
+            description: t.description,
+            parameters: z.toJSONSchema(t.inputSchema),
+            // strict, the default here, requires every property to be required; optional zod fields aren't
+            strict: false,
+          })),
+          // every request carries the whole history, so nothing needs storing; reasoning comes back encrypted instead
+          store: false,
+          stream: true,
+          // only when set: models without reasoning reject these
+          // ponytail: so auto effort gets no summaries or replayable reasoning; fix per model once we know which reason
+          ...(effort &&
+            (effort === "off"
+              ? { reasoning: { effort: "none" } }
+              : { reasoning: { effort, summary: "auto" }, include: ["reasoning.encrypted_content"] })),
+        },
+        { signal },
+      );
+      let response: OpenAI.Responses.Response | undefined;
+      for await (const event of stream) {
+        switch (event.type) {
+          case "response.output_text.delta":
+            onText(event.delta);
+            break;
+          // OpenAI streams reasoning summaries; others (e.g. Claude on OpenRouter) the reasoning itself
+          case "response.reasoning_summary_text.delta":
+          case "response.reasoning_text.delta":
+            onThinking(event.delta);
+            break;
+          case "response.completed":
+          case "response.incomplete":
+          case "response.failed":
+            response = event.response;
+        }
+      }
+      if (!response || response.error) throw new Error(response?.error?.message ?? "Response stream ended early");
+      const { output, usage } = response;
+      return {
+        role: "assistant",
+        usage: usage && {
+          input: usage.input_tokens,
+          output: usage.output_tokens,
+          cached: usage.input_tokens_details?.cached_tokens ?? 0,
+        },
+        text: output
+          .flatMap((i) => (i.type === "message" ? i.content : []))
+          .flatMap((c) => (c.type === "output_text" ? [c.text] : []))
+          .join(""),
+        toolCalls: output.flatMap((i) =>
+          i.type === "function_call" ? [{ id: i.call_id, name: i.name, input: parseArguments(i.arguments) }] : [],
+        ),
+        raw: {
+          provider: key,
+          // without ids, since nothing is stored to look them up by, so reasoning needs its encrypted content or text
+          content: output
+            .filter((i) => i.type !== "reasoning" || i.encrypted_content || i.content?.length)
+            .map(({ id, ...i }) => i),
+        },
       };
     },
   };
