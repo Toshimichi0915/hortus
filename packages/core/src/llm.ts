@@ -78,7 +78,7 @@ export interface Events {
 
 export type Handlers = { [E in keyof Events]?: (payload: Events[E]) => void | Promise<void> };
 
-/** Default export of a plugin module listed in config.plugins. */
+/** Default export of a plugin's entrypoint (see `phi.json` in plugins.ts). */
 export interface Plugin {
   providers?: Record<string, ProviderDef>;
   tools?: Tool[];

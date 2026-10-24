@@ -38,12 +38,12 @@ export interface RunOptions {
 }
 
 /**
- * Loads config and plugins once (built-ins, config.plugins, then `plugin`). `run` reports progress as events
+ * Loads config and plugins once (built-ins, ~/.phi/plugins, then `plugin`). `run` reports progress as events
  * (`text`, `tool_call`, `message`) to every plugin, so `plugin` is how a caller observes a run.
  */
 export async function createAgent(plugin?: Plugin) {
   const config = await loadConfig();
-  const { providers, tools, emit } = await loadPlugins(config.plugins ?? [], plugin ? [plugin] : []);
+  const { providers, tools, emit } = await loadPlugins(undefined, plugin ? [plugin] : []);
 
   /** Runs the tool loop on top of `history` until the model stops calling tools. `model`/`provider` override the config. */
   async function run(history: Message[], opts: RunOptions = {}): Promise<void> {

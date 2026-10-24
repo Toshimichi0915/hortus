@@ -8,8 +8,6 @@ export const PHI_DIR = join(homedir(), ".phi");
 export const ConfigSchema = z.object({
   provider: z.string().optional(),
   model: z.string().optional(),
-  /** plugin module paths, relative to ~/.phi */
-  plugins: z.array(z.string()).optional(),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 
