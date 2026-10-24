@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import { type Agent, openSession } from "@phi/core";
+import { type Agent, listSessions, openSession } from "@phi/core";
 import { type Cli, createCli } from "./cli.ts";
 import { builtinCommands, type Command, findCommand, parseCommand } from "./commands.ts";
 
@@ -106,6 +106,33 @@ test("/new and /clear show a new session next to the old one, with config defaul
   assert.deepEqual(old.getState().messages, [{ role: "user", content: "old" }]);
 });
 
+test("/resume shows another session next to the shown one at its last entry, the latest by default", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "phi-"));
+  const shown = await openSession(null, dir);
+  const cli = await createCli(shown, async () => ({ plugins: [], resolve, run: async () => {} }) as unknown as Agent);
+  assert.equal(await send(cli, "/resume"), "error: No sessions to resume");
+  const old = await openSession(null, dir);
+  await old.setModel("m1");
+  await old.append([{ role: "user", content: "old\n  one" }]);
+  await shown.append([{ role: "user", content: "shown" }]);
+  const ids = new Map((await listSessions(dir)).map((s) => [s.path, s.id]));
+  // not the shown one
+  const candidates = (await findCommand(cli.commands, "resume")?.complete?.(cli)) ?? [];
+  assert.deepEqual(
+    candidates.map((c) => c.value),
+    [ids.get(old.path)],
+  );
+  assert.match(candidates[0]?.label ?? "", /^\d{4}-\d\d-\d\d \d\d:\d\d {2}old one$/);
+  await send(cli, "/resume");
+  assert.deepEqual(
+    cli.ui.getState().entries.map((e) => e.text),
+    [`Session: ${old.path} (1 messages) · model: m1`, "\nold\n  one\n"],
+  );
+  await send(cli, `/resume ${ids.get(shown.path)}`);
+  assert.equal(cli.session.path, shown.path);
+  assert.equal(await send(cli, "/resume nope"), "error: Session not found: nope");
+});
+
 test("plugin commands run with their argument and replace built-ins by name; unknown names stay in the prompt", async () => {
   const session = await openSession(null, await mkdtemp(join(tmpdir(), "phi-")));
   const commands: Command[] = [
@@ -130,7 +157,7 @@ test("plugin commands run with their argument and replace built-ins by name; unk
   const cli = await createCli(session, async () => ({ plugins, resolve }) as unknown as Agent);
   assert.deepEqual(
     cli.commands.map((c) => c.name),
-    ["new", "model", "echo", "fail"],
+    ["new", "model", "resume", "echo", "fail"],
   );
   assert.equal(await send(cli, "/echo  a b"), "info: echo a b");
   assert.equal(await send(cli, "/fail"), "error: boom");

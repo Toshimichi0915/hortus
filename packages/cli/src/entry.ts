@@ -89,6 +89,11 @@ export function formatTool(call: ToolCall, result?: ToolResult): string {
   return ["", head, ...(body.length ? ["", ...body] : []), ""].join("\n");
 }
 
+const pad = (n: number) => String(n).padStart(2, "0");
+/** Local time as fixed-width `YYYY-MM-DD HH:MM`, so titles line up. */
+export const stamp = (d: Date) =>
+  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
 const k = (n: number) => `${(n / 1000).toFixed(1)}K`;
 const pct = (n: number, of: number) => (of ? `${((n / of) * 100).toFixed(1)}%` : "-");
 

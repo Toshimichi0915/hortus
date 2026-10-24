@@ -1,18 +1,13 @@
 import type { SessionInfo } from "@phi/core";
 import { Box, Text, useApp, useInput, useWindowSize } from "ink";
 import { useState } from "react";
-import { theme } from "./entry.ts";
+import { stamp, theme } from "./entry.ts";
 
 /** Sessions whose first user message contains every word of `query`, ignoring case. */
 export function filterSessions(sessions: SessionInfo[], query: string) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   return sessions.filter((s) => words.every((w) => s.title.toLowerCase().includes(w)));
 }
-
-const pad = (n: number) => String(n).padStart(2, "0");
-/** Local time as fixed-width `YYYY-MM-DD HH:MM`, so titles line up. */
-const stamp = (d: Date) =>
-  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
 /** Pick a session to resume: type to filter by first message, ↑/↓ to move, Enter to pick, Esc to quit. */
 export function SessionPicker({

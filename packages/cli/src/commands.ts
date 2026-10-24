@@ -1,6 +1,7 @@
 import { dirname } from "node:path";
-import { openSession } from "@phi/core";
+import { listSessions, openSession } from "@phi/core";
 import type { Cli } from "./cli.ts";
+import { stamp } from "./entry.ts";
 
 /** One choice for a command's argument. */
 export interface Candidate {
@@ -39,7 +40,7 @@ export function parseCommand(input: string) {
 export const findCommand = (commands: Command[], name: string) =>
   commands.find((c) => c.name === name) ?? commands.find((c) => c.aliases?.includes(name));
 
-/** /new and /model. */
+/** /new, /model and /resume. */
 export const builtinCommands: Command[] = [
   {
     name: "new",
@@ -74,6 +75,27 @@ export const builtinCommands: Command[] = [
       await cli.agent.resolve({ provider, model });
       await session.setModel(model, provider);
       return `Model set to ${provider}/${model}`;
+    },
+  },
+  {
+    name: "resume",
+    args: "[session]",
+    description: "Resume a session",
+    // the sessions next to the shown one, newest first, without it; titles on one line, like the session picker's
+    complete: async (cli) =>
+      (await listSessions(dirname(cli.session.path)))
+        .filter((s) => s.path !== cli.session.path)
+        .map((s) => ({
+          value: s.id,
+          label: `${stamp(s.created)}  ${s.title.replace(/\s+/g, " ") || "(no messages)"}`,
+        })),
+    run: async (arg, cli) => {
+      const { path } = cli.session;
+      // no id: the first candidate, so Enter while they're still loading picks what it would have
+      const s = (await listSessions(dirname(path))).find((s) => (arg ? s.id === arg : s.path !== path));
+      if (!s) throw new Error(arg ? `Session not found: ${arg}` : "No sessions to resume");
+      // at its last entry, like `phi -r`
+      cli.setSession(await openSession(s.leafId, dirname(path)));
     },
   },
 ];
