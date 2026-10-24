@@ -1,7 +1,16 @@
-import { Box, type CursorPosition, type DOMElement, measureElement, Text, useBoxMetrics, useCursor, useInput } from "ink";
+import {
+  Box,
+  type CursorPosition,
+  type DOMElement,
+  measureElement,
+  Text,
+  useBoxMetrics,
+  useCursor,
+  useInput,
+} from "ink";
 import { useEffect, useRef, useState } from "react";
 import stringWidth from "string-width";
-import { wrap } from "./transcript.tsx";
+import { wrap } from "./markdown.ts";
 
 /** `node`'s top-left on screen plus the visible row range of its clipping ancestors, undoing every `contentOffsetY`. */
 function screenBox(node: DOMElement) {

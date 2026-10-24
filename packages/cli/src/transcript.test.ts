@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { formatTool, theme } from "./entry.ts";
-import { selectionText, toRows, wrap } from "./transcript.tsx";
+import { wrap } from "./markdown.ts";
+import { selectionText, toRows } from "./transcript.tsx";
 
 test("wrap keeps every character and respects width, including wide chars", () => {
   for (const line of [

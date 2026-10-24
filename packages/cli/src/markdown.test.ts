@@ -49,9 +49,17 @@ test("markdown renders setext headings, styles across lines and tables", () => {
       { color: theme.muted, italic: true, text: "r" },
     ],
   ]);
-  const rows = markdown("| a | bb |\n|---|---:|\n| ccc | d \\| |", 1);
+  const rows = markdown("| a | bb |\n|---|---:|\n| ccc | d \\| |", 80);
   assert.deepEqual(
     rows.map((r) => r.map((s) => s.text).join("")),
     ["a   │  bb", "────┼────", "ccc │ d |"],
+  );
+});
+
+test("markdown shrinks a table wider than the pane and wraps its cells", () => {
+  const rows = markdown("| a | long text here |\n|---|---|\n| b | x |", 10);
+  assert.deepEqual(
+    rows.map((r) => r.map((s) => s.text).join("")),
+    ["a │ long  ", "  │ text  ", "  │ here  ", "──┼───────", "b │ x     "],
   );
 });

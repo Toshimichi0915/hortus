@@ -35,6 +35,55 @@ export function inline(text: string, style: Style = {}): Span[] {
   return out;
 }
 
+const graphemes = (s: string) => Array.from(new Intl.Segmenter().segment(s), (g) => g.segment);
+
+/** Word-wraps at `width` columns without dropping any character, so a row's text concatenates back to the line. */
+export function wrap(line: string, width: number): string[] {
+  const rows: string[] = [];
+  let cur = "";
+  let w = 0;
+  let space = -1; // string index of the last space in `cur`
+  for (const g of graphemes(line)) {
+    const gw = stringWidth(g);
+    if (w + gw > width && cur) {
+      // break after the last space if there is one, else mid-word
+      const cut = space > 0 ? space + 1 : cur.length;
+      rows.push(cur.slice(0, cut));
+      cur = cur.slice(cut);
+      w = stringWidth(cur);
+      space = -1;
+    }
+    if (g === " ") space = cur.length;
+    cur += g;
+    w += gw;
+  }
+  rows.push(cur);
+  return rows;
+}
+
+/** Text between columns [from, to) of a row. */
+export function sliceCols(text: string, from: number, to: number) {
+  let col = 0;
+  let out = "";
+  for (const g of graphemes(text)) {
+    if (col >= from && col < to) out += g;
+    col += stringWidth(g);
+  }
+  return out;
+}
+
+/** The parts of `spans` between columns [from, to). */
+export function cutCols(spans: Span[], from: number, to: number) {
+  const out: Span[] = [];
+  let col = 0;
+  for (const s of spans) {
+    const text = sliceCols(s.text, from - col, to - col);
+    if (text) out.push({ ...s, text });
+    col += stringWidth(s.text);
+  }
+  return out;
+}
+
 const DELIM = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
 
 /** A table row's cells; `\|` escapes a pipe. ponytail: a `|` inside a code span still splits the cell. */
@@ -48,11 +97,35 @@ const cells = (row: string) =>
 
 const spanWidth = (spans: Span[]) => stringWidth(spans.map((s) => s.text).join(""));
 
-/** Lays out a table with columns padded to their widest cell. ponytail: wider than the pane, it soft-wraps. */
-function table(rows: string[]): Span[][] {
+/**
+ * Lays out a table with columns padded to their widest cell. Wider than `width`, the widest columns shrink and
+ * their cells wrap inside the column, so no line soft-wraps and breaks the borders.
+ */
+function table(rows: string[], width: number): Span[][] {
   const [head = [], delim = [], ...body] = rows.map(cells);
   const grid = [head, ...body].map((r) => head.map((_, c) => inline(r[c] ?? "", r === head ? { bold: true } : {})));
-  const widths = head.map((_, c) => Math.max(...grid.map((r) => spanWidth(r[c] ?? []))));
+  const widths = head.map((_, c) => Math.max(1, ...grid.map((r) => spanWidth(r[c] ?? []))));
+  // ponytail: shrinks one column per step, O(overflow × columns); fine for terminal-sized tables.
+  // 2 columns minimum so a wide char still fits; below that the table soft-wraps.
+  for (let over = widths.reduce((a, w) => a + w + 3, -3) - width; over > 0; over--) {
+    const max = Math.max(...widths);
+    if (max <= 2) break;
+    widths[widths.indexOf(max)] = max - 1;
+  }
+  // one grid row → as many lines as its tallest wrapped cell
+  const lines = (r: Span[][]) => {
+    const parts = r.map((cell, c) => {
+      let col = 0;
+      return wrap(cell.map((s) => s.text).join(""), widths[c] ?? 1).map((t) => {
+        const from = col;
+        col += stringWidth(t);
+        return cutCols(cell, from, col);
+      });
+    });
+    return Array.from({ length: Math.max(...parts.map((p) => p.length)) }, (_, k) =>
+      line(parts.map((p) => p[k] ?? [])),
+    );
+  };
   const line = (r: Span[][]) =>
     r.flatMap((cell, c) => {
       const pad = (widths[c] ?? 0) - spanWidth(cell);
@@ -66,9 +139,9 @@ function table(rows: string[]): Span[][] {
       ];
     });
   return [
-    line(grid[0] ?? []),
+    ...lines(grid[0] ?? []),
     [{ dimColor: true, text: widths.map((w) => "─".repeat(w)).join("─┼─") }],
-    ...grid.slice(1).map(line),
+    ...grid.slice(1).flatMap(lines),
   ];
 }
 
@@ -129,7 +202,7 @@ export function markdown(text: string, width: number): Span[][] {
       flush();
       let end = i + 2;
       while (lines[end]?.includes("|") && lines[end]?.trim()) end++;
-      out.push(...table(lines.slice(i, end)));
+      out.push(...table(lines.slice(i, end), width));
       i = end - 1;
     } else if (/^ {0,3}([-*_])( *\1){2,} *$/.test(line)) {
       flush();

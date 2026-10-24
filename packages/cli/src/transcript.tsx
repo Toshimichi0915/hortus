@@ -3,7 +3,7 @@ import { Box, type DOMElement, Text, useBoxMetrics, useInput, useStdin } from "i
 import { useEffect, useMemo, useRef, useState } from "react";
 import stringWidth from "string-width";
 import { type Entry, styles, theme } from "./entry.ts";
-import { markdown, type Span } from "./markdown.ts";
+import { cutCols, markdown, type Span, sliceCols, wrap } from "./markdown.ts";
 
 /**
  * One screen row. `text` is its plain text and `spans` the same text styled.
@@ -19,32 +19,6 @@ export interface Row {
 interface Point {
   row: number;
   col: number;
-}
-
-const graphemes = (s: string) => Array.from(new Intl.Segmenter().segment(s), (g) => g.segment);
-
-/** Word-wraps at `width` columns without dropping any character, so a row's text concatenates back to the line. */
-export function wrap(line: string, width: number): string[] {
-  const rows: string[] = [];
-  let cur = "";
-  let w = 0;
-  let space = -1; // string index of the last space in `cur`
-  for (const g of graphemes(line)) {
-    const gw = stringWidth(g);
-    if (w + gw > width && cur) {
-      // break after the last space if there is one, else mid-word
-      const cut = space > 0 ? space + 1 : cur.length;
-      rows.push(cur.slice(0, cut));
-      cur = cur.slice(cut);
-      w = stringWidth(cur);
-      space = -1;
-    }
-    if (g === " ") space = cur.length;
-    cur += g;
-    w += gw;
-  }
-  rows.push(cur);
-  return rows;
 }
 
 export function toRows(entries: Entry[], width: number): Row[] {
@@ -81,29 +55,6 @@ export function toRows(entries: Entry[], width: number): Row[] {
     });
   }
   return rows;
-}
-
-/** Text between columns [from, to) of a row. */
-function sliceCols(text: string, from: number, to: number) {
-  let col = 0;
-  let out = "";
-  for (const g of graphemes(text)) {
-    if (col >= from && col < to) out += g;
-    col += stringWidth(g);
-  }
-  return out;
-}
-
-/** The parts of `spans` between columns [from, to). */
-function cutCols(spans: Span[], from: number, to: number) {
-  const out: Span[] = [];
-  let col = 0;
-  for (const s of spans) {
-    const text = sliceCols(s.text, from - col, to - col);
-    if (text) out.push({ ...s, text });
-    col += stringWidth(s.text);
-  }
-  return out;
 }
 
 const show = (spans: Span[]) =>
