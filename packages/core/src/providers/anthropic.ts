@@ -10,19 +10,20 @@ function toAnthropic(m: Message): Anthropic.MessageParam[] {
     case "user":
       return [m];
     case "assistant": {
-      if (m.raw?.provider === "anthropic")
-        return [{ role: "assistant", content: m.raw.content as Anthropic.ContentBlockParam[] }];
-      const content: Anthropic.ContentBlockParam[] = [
-        ...(m.text ? [{ type: "text" as const, text: m.text }] : []),
-        ...m.toolCalls.map((c) => ({
-          type: "tool_use" as const,
-          id: toolId(c.id),
-          name: c.name,
-          // unparseable arguments from another provider; the tool result already reports the error
-          input: typeof c.input === "object" && c.input !== null ? c.input : {},
-        })),
-      ];
-      // empty assistant turns (possible from other providers) are rejected by the API
+      const content: Anthropic.ContentBlockParam[] =
+        m.raw?.provider === "anthropic"
+          ? (m.raw.content as Anthropic.ContentBlockParam[])
+          : [
+              ...(m.text ? [{ type: "text" as const, text: m.text }] : []),
+              ...m.toolCalls.map((c) => ({
+                type: "tool_use" as const,
+                id: toolId(c.id),
+                name: c.name,
+                // unparseable arguments from another provider; the tool result already reports the error
+                input: typeof c.input === "object" && c.input !== null ? c.input : {},
+              })),
+            ];
+      // empty assistant turns (an empty end_turn reply, or from other providers) are rejected by the API
       return content.length ? [{ role: "assistant", content }] : [];
     }
     case "tool":

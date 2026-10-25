@@ -7,6 +7,8 @@ function toOpenAI(m: Message): OpenAI.ChatCompletionMessageParam[] {
     case "user":
       return [m];
     case "assistant":
+      // an empty reply (e.g. from Anthropic) has neither content nor tool calls, which the API rejects
+      if (!m.text && !m.toolCalls.length) return [];
       return [
         {
           role: "assistant",

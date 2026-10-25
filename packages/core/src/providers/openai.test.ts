@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { z } from "zod";
 import { type Message, tool } from "../llm.ts";
-import { openaiResponsesProvider } from "./openai.ts";
+import { openaiProvider, openaiResponsesProvider } from "./openai.ts";
 
 const sse = (...events: object[]) =>
   new Response(events.map((e) => `event: ${(e as { type: string }).type}\ndata: ${JSON.stringify(e)}\n\n`).join(""), {
@@ -118,4 +118,33 @@ test("openaiResponsesProvider streams a turn and replays its output only to the 
     ),
     /boom/,
   );
+});
+
+test("openaiProvider drops an empty assistant turn, which Chat Completions rejects", async () => {
+  let body: { messages: unknown[] } | undefined;
+  const provider = openaiProvider({
+    apiKey: "k",
+    baseURL: "http://test/v1",
+    maxRetries: 0,
+    fetch: async (_url, init) => {
+      body = JSON.parse(String(init?.body));
+      throw new Error("sent");
+    },
+  });
+  const messages: Message[] = [
+    { role: "user", content: "a" },
+    { role: "assistant", text: "", toolCalls: [] },
+    { role: "user", content: "b" },
+  ];
+  await assert.rejects(
+    provider.complete(
+      { model: "m", system: "", messages, tools: [] },
+      () => {},
+      () => {},
+    ),
+  );
+  assert.deepEqual(body?.messages.slice(1), [
+    { role: "user", content: "a" },
+    { role: "user", content: "b" },
+  ]);
 });
