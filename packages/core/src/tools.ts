@@ -51,53 +51,94 @@ const normalizeFuzzy = (text: string) =>
 
 interface Match {
   i: number;
+  oldText: string;
+  fuzzy: boolean;
   index: number;
   length: number;
+  from: number;
+  to: number;
   newText: string;
 }
 
 const replace = (text: string, matches: Match[], offset = 0) =>
   matches.reduceRight((s, m) => s.slice(0, m.index - offset) + m.newText + s.slice(m.index - offset + m.length), text);
 
+const lineOf = (text: string, index: number) => text.slice(0, index).split("\n").length - 1;
+
 /**
- * Applies `edits` (each matched against the original, LF-normalized `content`). Falls back to fuzzy matching when an
- * oldText isn't found verbatim; then only the lines an edit touches take the normalized text.
+ * Applies `edits` (each matched against the original, LF-normalized `content`). An oldText not found verbatim falls
+ * back to fuzzy matching; only the lines a fuzzy match touches take the normalized text.
  */
 export function applyEdits(content: string, edits: { oldText: string; newText: string }[], path: string): string {
   const one = edits.length === 1;
-  const fuzzy = edits.some((e) => !content.includes(e.oldText));
-  const base = fuzzy ? normalizeFuzzy(content) : content;
-  const matches = edits.map(({ oldText, newText }, i): Match => {
-    if (!oldText)
-      throw new Error(
-        one ? `oldText must not be empty in ${path}.` : `edits[${i}].oldText must not be empty in ${path}.`,
-      );
-    const old = fuzzy ? normalizeFuzzy(oldText) : oldText;
-    const index = base.indexOf(old);
+  const base = edits.some((e) => !content.includes(e.oldText)) ? normalizeFuzzy(content) : undefined;
+  const locate = (text: string, old: string, i: number) => {
+    const index = text.indexOf(old);
     if (index === -1)
       throw new Error(
         one
           ? `Could not find the exact text in ${path}. The old text must match exactly including all whitespace and newlines.`
           : `Could not find edits[${i}] in ${path}. The oldText must match exactly including all whitespace and newlines.`,
       );
-    const count = base.split(old).length - 1;
+    const count = text.split(old).length - 1;
     if (count > 1)
       throw new Error(
         one
           ? `Found ${count} occurrences of the text in ${path}. The text must be unique. Please provide more context to make it unique.`
           : `Found ${count} occurrences of edits[${i}] in ${path}. Each oldText must be unique. Please provide more context to make it unique.`,
       );
-    return { i, index, length: old.length, newText };
-  });
-  matches.sort((a, b) => a.index - b.index);
-  for (let k = 1; k < matches.length; k++) {
-    const [a, b] = [matches[k - 1] as Match, matches[k] as Match];
-    if (a.index + a.length > b.index)
+    return index;
+  };
+  const matches = edits.map(({ oldText, newText }, i): Match => {
+    if (!oldText)
       throw new Error(
-        `edits[${a.i}] and edits[${b.i}] overlap in ${path}. Merge them into one edit or target disjoint regions.`,
+        one ? `oldText must not be empty in ${path}.` : `edits[${i}].oldText must not be empty in ${path}.`,
       );
+    const fuzzy = !content.includes(oldText);
+    const text = fuzzy ? (base as string) : content;
+    const old = fuzzy ? normalizeFuzzy(oldText) : oldText;
+    const index = locate(text, old, i);
+    const from = lineOf(text, index);
+    const to = lineOf(text, index + Math.max(old.length - 1, 0));
+    return { i, oldText, fuzzy, index, length: old.length, from, to, newText };
+  });
+  // normalizeFuzzy keeps the line count, so line numbers are shared; group matches into disjoint line ranges
+  matches.sort((a, b) => a.from - b.from || a.index - b.index);
+  const groups: { from: number; to: number; matches: Match[] }[] = [];
+  for (const m of matches) {
+    const last = groups.at(-1);
+    if (last && m.from <= last.to) {
+      last.to = Math.max(last.to, m.to);
+      last.matches.push(m);
+    } else groups.push({ from: m.from, to: m.to, matches: [m] });
   }
-  const result = fuzzy ? replaceLines(content, base, matches) : replace(content, matches);
+  const origLines = content.split("\n");
+  const baseLines = base?.split("\n") ?? origLines;
+  const out: string[] = [];
+  let line = 0;
+  for (const g of groups) {
+    // a group with a fuzzy match takes the normalized lines, so its exact matches are located there too
+    const fuzzy = g.matches.some((m) => m.fuzzy);
+    if (fuzzy)
+      for (const m of g.matches.filter((m) => !m.fuzzy)) {
+        const old = normalizeFuzzy(m.oldText);
+        Object.assign(m, { index: locate(base as string, old, m.i), length: old.length });
+      }
+    g.matches.sort((a, b) => a.index - b.index);
+    for (let k = 1; k < g.matches.length; k++) {
+      const [a, b] = [g.matches[k - 1] as Match, g.matches[k] as Match];
+      if (a.index + a.length > b.index)
+        throw new Error(
+          `edits[${a.i}] and edits[${b.i}] overlap in ${path}. Merge them into one edit or target disjoint regions.`,
+        );
+    }
+    const lines = fuzzy ? baseLines : origLines;
+    const offset = lines.slice(0, g.from).join("\n").length + (g.from ? 1 : 0);
+    out.push(...origLines.slice(line, g.from), replace(lines.slice(g.from, g.to + 1).join("\n"), g.matches, offset));
+    line = g.to + 1;
+  }
+  out.push(...origLines.slice(line));
+  const result = out.join("\n");
   if (result === content)
     throw new Error(
       one
@@ -105,36 +146,6 @@ export function applyEdits(content: string, edits: { oldText: string; newText: s
         : `No changes made to ${path}. The replacements produced identical content.`,
     );
   return result;
-}
-
-/** Applies matches found in `base` (fuzzy-normalized `original`), keeping `original`'s text on every untouched line. */
-function replaceLines(original: string, base: string, matches: Match[]): string {
-  const origLines = original.split("\n");
-  const baseLines = base.split("\n");
-  const starts: number[] = [];
-  for (let i = 0, at = 0; i < baseLines.length; at += (baseLines[i] as string).length + 1, i++) starts.push(at);
-  const lineOf = (index: number) => base.slice(0, index).split("\n").length - 1;
-  // group matches into disjoint line ranges [from, to]
-  const groups: { from: number; to: number; matches: Match[] }[] = [];
-  for (const m of matches) {
-    const from = lineOf(m.index);
-    const to = lineOf(m.index + Math.max(m.length - 1, 0));
-    const last = groups.at(-1);
-    if (last && from <= last.to) {
-      last.to = Math.max(last.to, to);
-      last.matches.push(m);
-    } else groups.push({ from, to, matches: [m] });
-  }
-  const out: string[] = [];
-  let line = 0;
-  for (const g of groups) {
-    out.push(...origLines.slice(line, g.from));
-    const offset = starts[g.from] as number;
-    out.push(replace(baseLines.slice(g.from, g.to + 1).join("\n"), g.matches, offset));
-    line = g.to + 1;
-  }
-  out.push(...origLines.slice(line));
-  return out.join("\n");
 }
 
 export const readTool = tool({
@@ -193,6 +204,7 @@ export const editTool = tool({
     const raw = await readFile(path, "utf8");
     const bom = raw.charCodeAt(0) === 0xfeff ? raw.slice(0, 1) : "";
     const text = raw.slice(bom.length);
+    // ponytail: line endings follow the first one in the file; track them per line if mixed-ending files matter
     const crlf = text.includes("\r\n") && text.indexOf("\r\n") <= text.indexOf("\n");
     const lf = (s: string) => s.replace(/\r\n?/g, "\n");
     const edited = applyEdits(

@@ -40,6 +40,19 @@ test("applyEdits matches exactly, rejects missing/duplicate/overlapping, falls b
     applyEdits("keep  \nsay “hi”  \nkeep2  ", [{ oldText: 'say "hi"', newText: "bye" }], "f"),
     "keep  \nbye\nkeep2  ",
   );
+  // a fuzzy edit doesn't normalize the lines of exact edits
+  assert.equal(
+    applyEdits(
+      'a = "（注）—１"\nb = “x”\nc = 1\n',
+      [
+        { oldText: "a", newText: "A" },
+        { oldText: 'b = "x"', newText: 'b = "y"' },
+        { oldText: "c = ", newText: "C = " },
+      ],
+      "f",
+    ),
+    'A = "（注）—１"\nb = "y"\nC = 1\n',
+  );
 });
 
 test("truncate keeps head or tail within the line limit", () => {
