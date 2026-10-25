@@ -216,14 +216,15 @@ export async function createCli(session: Session, makeAgent: (observer: Plugin) 
         // error entries get no separator row, so the leading newline adds one; the next turn adds the one below
         push(entry("error", "\nInterrupted"));
       }
-      // the turn moves into session.messages in one tick, so the usage line never counts it twice
-      const saved = session.append(ui.getState().turn);
-      ui.setState({ turn: [] });
-      await saved;
     } catch (e) {
       flush();
       push(entry("error", errorText(e)));
     }
+    // completed messages are kept after an error too, so the next turn sees what the transcript shows; the turn moves
+    // into session.messages in one tick, so the usage line never counts it twice
+    const saved = session.append(ui.getState().turn);
+    ui.setState({ turn: [] });
+    await saved.catch((e) => push(entry("error", errorText(e))));
     ui.setState({ busy: false });
   }
 

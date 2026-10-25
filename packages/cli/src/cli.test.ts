@@ -58,6 +58,29 @@ test("streamed deltas reach the store once a frame, and none are lost when the r
   assert.equal(cli.ui.getState().entries.at(-1)?.text, "abcd");
 });
 
+test("a run that fails keeps its completed messages in the session", async () => {
+  const session = await openSession(null, await mkdtemp(join(tmpdir(), "hortus-")));
+  let observer: Plugin | undefined;
+  const run = async () => {
+    await observer?.on?.message?.({ role: "assistant", text: "", toolCalls: [{ id: "1", name: "bash", input: {} }] });
+    await observer?.on?.message?.({ role: "tool", results: [{ id: "1", output: "ok" }] });
+    throw new Error("429");
+  };
+  const resolve = async () => ({ name: "p", model: "m", provider: {} });
+  const cli = await createCli(session, async (o) => {
+    observer = o;
+    return { plugins: [], resolve, run } as unknown as Agent;
+  });
+  cli.submit("hi");
+  await sleep(20);
+  assert.deepEqual(
+    session.getState().messages.map((m) => m.role),
+    ["user", "assistant", "tool"],
+  );
+  assert.deepEqual(cli.ui.getState().turn, []);
+  assert.equal(cli.ui.getState().entries.at(-1)?.text, "429");
+});
+
 test("runs use the set effort only if the model takes it, or while its efforts are unknown", () => {
   const state = (effort: UiState["effort"], efforts?: UiState["effort"][]) =>
     ({ effort, status: { name: "p", model: "m", efforts } }) as UiState;
