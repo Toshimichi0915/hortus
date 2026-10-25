@@ -15,11 +15,19 @@ export const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 
 export async function loadConfig(): Promise<Config> {
+  const path = join(HORTUS_DIR, "config.json");
+  let text: string;
   try {
-    return ConfigSchema.parse(await JSON.parse(await readFile(join(HORTUS_DIR, "config.json"), "utf8")));
+    text = await readFile(path, "utf8");
   } catch (e) {
-    if (e instanceof z.ZodError || (e as NodeJS.ErrnoException).code === "ENOENT") return {};
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return {};
     throw e;
+  }
+  // thrown, not read as empty: saving over an invalid file would lose the rest of it
+  try {
+    return ConfigSchema.parse(JSON.parse(text));
+  } catch (e) {
+    throw new Error(`Invalid ${path}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
