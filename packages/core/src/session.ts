@@ -59,10 +59,14 @@ const parsers: Parser[] = [
 
 // ponytail: plain JSON, binary parts (images/files) won't round-trip; add a reviver if tools return them
 const parse = (text: string): SessionEntry[] =>
-  text
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
+  text.split("\n").flatMap((line) => {
+    // a line cut short by a crash mid-write is skipped, like one no parser knows
+    try {
+      return line ? [JSON.parse(line)] : [];
+    } catch {
+      return [];
+    }
+  });
 
 /** State from replaying the root down to `leafId`. */
 export function branch(entries: SessionEntry[], leafId: string): SessionState {
@@ -116,6 +120,8 @@ export async function openSession(id: string | null, dir = sessionsDir): Promise
   await mkdir(dir, { recursive: true });
   let name = `${Math.floor(Date.now() / 1000)}_${randomUUID()}.jsonl`;
   let state: SessionState = { messages: [] };
+  // ends a line cut short by a crash, so the next entry doesn't join it
+  let lead = "";
 
   if (id !== null) {
     // epoch prefix makes lexical order chronological; newest first since recent entries are the likely target
@@ -126,9 +132,11 @@ export async function openSession(id: string | null, dir = sessionsDir): Promise
     let found = false;
     // ponytail: linear scan of every session file; add an id -> file index if this gets slow
     for (const n of names) {
-      const entries = parse(await readFile(join(dir, n), "utf8"));
+      const text = await readFile(join(dir, n), "utf8");
+      const entries = parse(text);
       if (!entries.some((e) => e.id === id)) continue;
       name = n;
+      if (!text.endsWith("\n")) lead = "\n";
       state = branch(entries, id);
       found = true;
       break;
@@ -158,7 +166,8 @@ export async function openSession(id: string | null, dir = sessionsDir): Promise
     },
   };
   async function write(items: EntryBody[]) {
-    let lines = "";
+    let lines = lead;
+    lead = "";
     for (const item of items) {
       const entry: SessionEntry = { v: 1, id: randomUUID(), parentId: session.leafId, ...item };
       session.leafId = entry.id;

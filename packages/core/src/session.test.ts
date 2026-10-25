@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -94,4 +94,18 @@ test("listSessions lists non-empty sessions newest first, titled by the first us
   const resumed = await openSession(list[0]?.leafId ?? null, dir);
   assert.equal(resumed.path, a.path);
   assert.equal(resumed.getState().messages.length, 2);
+});
+
+test("a line cut short by a crash is skipped, and the next entry starts on a line of its own", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hortus-"));
+  const a = await openSession(null, dir);
+  await a.append([{ role: "user", content: "hi" }]);
+  await appendFile(a.path, '{"v":1,"id":"y","par');
+  const [info] = await listSessions(dir);
+  assert.equal(info?.title, "hi");
+  const resumed = await openSession(info?.leafId ?? null, dir);
+  await resumed.append([{ role: "user", content: "again" }]);
+  const [after] = await listSessions(dir);
+  assert.equal(after?.leafId, resumed.leafId);
+  assert.equal((await openSession(after?.leafId ?? null, dir)).getState().messages.length, 2);
 });
