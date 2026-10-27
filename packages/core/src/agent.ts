@@ -3,8 +3,6 @@ import type { Effort, Image, Message, Tool, ToolCall, ToolResult } from "./llm.t
 import { type LoadOptions, loadPlugins } from "./plugins.ts";
 import { loadSecrets } from "./secrets.ts";
 
-const maxSteps = 50;
-
 async function runTool(tools: Tool[], call: ToolCall): Promise<ToolResult> {
   const t = tools.find((t) => t.name === call.name);
   if (!t) return { id: call.id, output: `Unknown tool: ${call.name}`, isError: true };
@@ -72,7 +70,7 @@ export async function createAgent(opts?: LoadOptions) {
     await emit("session_start", start);
     const system = start.system.join("\n\n");
     const messages = [...history];
-    for (let step = 0; step < maxSteps; step++) {
+    for (;;) {
       if (opts.signal?.aborted) return;
       const assistant = await provider.complete(
         { model, system, messages, tools, effort: opts.effort, signal: opts.signal },
