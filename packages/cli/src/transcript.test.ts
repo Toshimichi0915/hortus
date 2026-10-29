@@ -19,7 +19,7 @@ test("wrap keeps every character and respects width, including wide chars", () =
 });
 
 test("selection joins soft-wrapped rows without newlines and real lines with them", () => {
-  const rows = toRows([{ id: 0, kind: "assistant", text: "aaa bbb ccc\nsecond" }], 7);
+  const rows = toRows([{ id: 0, kind: "user", text: "aaa bbb ccc\nsecond" }], 7);
   assert.deepEqual(
     rows.map((r) => [r.text, r.cont]),
     [
@@ -33,6 +33,30 @@ test("selection joins soft-wrapped rows without newlines and real lines with the
   // reversed drag gives the same text; columns past the end are fine
   assert.equal(selectionText(rows, { row: 2, col: 2 }, { row: 0, col: 0 }), "aaa bbb ccc\nsec");
   assert.equal(selectionText(rows, { row: 0, col: 2 }, { row: 0, col: 99 }), "a ");
+});
+
+test("selection across rows copies assistant output as its markdown source lines", () => {
+  const md = "Title\n===\n**aaa bbb** ccc\n\n| a | b |\n|---|---|\n| c | d |\nend";
+  const rows = toRows(
+    [
+      { id: 0, kind: "user", text: "hi" },
+      { id: 1, kind: "assistant", text: md },
+    ],
+    7,
+  );
+  const at = (t: string) => rows.findIndex((r) => r.text.startsWith(t));
+  // a single row stays rendered text
+  assert.equal(selectionText(rows, { row: at("bbb"), col: 0 }, { row: at("bbb"), col: 2 }), "bbb");
+  // the heading pulls in its underline; a wrapped line copies once, whole
+  assert.equal(
+    selectionText(rows, { row: at("Title"), col: 3 }, { row: at("bbb"), col: 0 }),
+    "Title\n===\n**aaa bbb** ccc",
+  );
+  // touching a table copies all of it; plain rows before the entry stay as they were
+  assert.equal(
+    selectionText(rows, { row: 0, col: 0 }, { row: at("c"), col: 0 }),
+    "hi\n\nTitle\n===\n**aaa bbb** ccc\n\n| a | b |\n|---|---|\n| c | d |",
+  );
 });
 
 test("styled spans are split across wrapped rows", () => {

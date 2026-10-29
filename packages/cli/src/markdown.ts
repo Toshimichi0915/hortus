@@ -148,14 +148,20 @@ function table(rows: string[], width: number): Span[][] {
 /**
  * Renders markdown into one list of styled spans per output line: fences, headings, rules, tables, quotes,
  * bullets, and inline styles, which may span the lines of a paragraph, quote or list item.
+ * `src` receives, per output line, the [first, last] source lines it renders (a table renders all of its lines).
  */
-export function markdown(text: string, width: number): Span[][] {
+export function markdown(text: string, width: number, src: [number, number][] = []): Span[][] {
   const lines = text.split("\n");
   const out: Span[][] = [];
+  const put = (l: Span[], from: number, to = from) => {
+    out.push(l);
+    src.push([from, to]);
+  };
   // the current paragraph, quote or list item: inline styles may cross its line breaks
-  let group: { prefix: Span[]; text: string }[] = [];
+  let group: { prefix: Span[]; text: string; i: number }[] = [];
   let kind: "para" | "quote" | "bullet" | undefined;
-  const flush = (style: Style = kind === "quote" ? { color: theme.muted } : {}) => {
+  // `end` = the last source line of the group (a setext underline)
+  const flush = (style: Style = kind === "quote" ? { color: theme.muted } : {}, end?: number) => {
     if (!group.length) return;
     const split: Span[][] = [[]];
     for (const s of inline(group.map((g) => g.text).join("\n"), style))
@@ -164,7 +170,7 @@ export function markdown(text: string, width: number): Span[][] {
         if (t) split[split.length - 1]?.push({ ...s, text: t });
       });
     group.forEach((g, k) => {
-      out.push([...g.prefix, ...(split[k] ?? [])]);
+      put([...g.prefix, ...(split[k] ?? [])], g.i, k === group.length - 1 ? (end ?? g.i) : g.i);
     });
     group = [];
     kind = undefined;
@@ -176,56 +182,57 @@ export function markdown(text: string, width: number): Span[][] {
     if (open && (!fence || open.startsWith(fence))) {
       flush();
       fence = fence ? undefined : open;
-      out.push([{ color: theme.muted, text: line }]);
+      put([{ color: theme.muted, text: line }], i);
       continue;
     }
     if (fence) {
-      out.push([{ color: theme.green, text: line }]);
+      put([{ color: theme.green, text: line }], i);
       continue;
     }
     if (!line.trim()) {
       flush();
-      out.push([]);
+      put([], i);
       continue;
     }
     // setext heading: a paragraph underlined with === or ---
     if (kind === "para" && /^ {0,3}(=+|-+) *$/.test(line)) {
-      flush({ color: theme.yellow, bold: true });
+      flush({ color: theme.yellow, bold: true }, i);
       continue;
     }
     const heading = line.match(/^#{1,6}\s+(.*)$/);
     const next = lines[i + 1] ?? "";
     if (heading) {
       flush();
-      out.push(inline(heading[1] ?? "", { color: theme.yellow, bold: true }));
+      put(inline(heading[1] ?? "", { color: theme.yellow, bold: true }), i);
     } else if (line.includes("|") && next.includes("|") && DELIM.test(next)) {
       flush();
       let end = i + 2;
       while (lines[end]?.includes("|") && lines[end]?.trim()) end++;
-      out.push(...table(lines.slice(i, end), width));
+      for (const l of table(lines.slice(i, end), width)) put(l, i, end - 1);
       i = end - 1;
     } else if (/^ {0,3}([-*_])( *\1){2,} *$/.test(line)) {
       flush();
-      out.push([{ color: theme.muted, text: "─".repeat(width) }]);
+      put([{ color: theme.muted, text: "─".repeat(width) }], i);
     } else {
       const quote = line.match(/^(\s*)>\s?(.*)$/);
       const bullet = line.match(/^(\s*)[-*+]\s+(.*)$/);
       if (quote) {
         if (kind !== "quote") flush();
         kind = "quote";
-        group.push({ prefix: [{ color: theme.muted, text: `${quote[1]}│ ` }], text: quote[2] ?? "" });
+        group.push({ prefix: [{ color: theme.muted, text: `${quote[1]}│ ` }], text: quote[2] ?? "", i });
       } else if (bullet) {
         flush();
         kind = "bullet";
         group.push({
           prefix: [...(bullet[1] ? [{ text: bullet[1] }] : []), { color: theme.accent, text: "• " }],
           text: bullet[2] ?? "",
+          i,
         });
       } else {
         // a plain line continues a paragraph or list item
         if (kind === "quote") flush();
         kind ??= "para";
-        group.push({ prefix: [], text: line });
+        group.push({ prefix: [], text: line, i });
       }
     }
   }

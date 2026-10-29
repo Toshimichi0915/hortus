@@ -8,6 +8,7 @@ import { cutCols, markdown, type Span, sliceCols, wrap } from "./markdown.ts";
 /**
  * One screen row. `text` is its plain text and `spans` the same text styled.
  * `cont` = soft-wrapped continuation of the previous row (joined without a newline on copy).
+ * `md` = an assistant row's markdown source and the [from, to] source lines it renders, copied instead of `text`.
  */
 export interface Row {
   kind: Entry["kind"];
@@ -15,6 +16,7 @@ export interface Row {
   spans: Span[];
   cont: boolean;
   bold?: boolean;
+  md?: { lines: string[]; from: number; to: number };
 }
 interface Point {
   row: number;
@@ -42,15 +44,18 @@ function entryRows(e: Entry, width: number): Row[] {
         : diff && t.startsWith("- ")
           ? theme.red
           : theme.muted;
+  const src: [number, number][] = [];
   const lines =
     e.kind === "assistant"
-      ? markdown(e.text, width)
+      ? markdown(e.text, width, src)
       : split.map((t, l) => [{ text: t, color: block ? color(t, l) : undefined }]);
   lines.forEach((spans, l) => {
     let col = 0;
+    const s = src[l];
+    const md = s && { lines: split, from: s[0], to: s[1] };
     wrap(spans.map((s) => s.text).join(""), Math.max(1, width)).forEach((text, i) => {
       const w = stringWidth(text);
-      rows.push({ kind: e.kind, text, spans: cutCols(spans, col, col + w), cont: i > 0, bold: l === head });
+      rows.push({ kind: e.kind, text, spans: cutCols(spans, col, col + w), cont: i > 0, bold: l === head, md });
       col += w;
     });
   });
@@ -87,12 +92,25 @@ function selectedCols(sel: { a: Point; b: Point } | undefined, row: number) {
   return [row === s.row ? s.col : 0, row === e.row ? e.col + 1 : Number.POSITIVE_INFINITY] as const;
 }
 
+/**
+ * The selected text. Across rows, assistant output copies as its markdown source, whole lines: every source line
+ * from the first selected one's to the last's, including ones that render to nothing (a setext underline).
+ */
 export function selectionText(rows: Row[], a: Point, b: Point) {
   const [s, e] = order(a, b) as [Point, Point];
   let out = "";
+  let last: { lines: string[]; to: number } | undefined;
   for (let r = s.row; r <= e.row; r++) {
     const row = rows[r];
     if (!row) continue;
+    if (row.md && s.row !== e.row) {
+      const { lines, from, to } = row.md;
+      const start = last?.lines === lines ? last.to + 1 : from;
+      for (let l = start; l <= to; l++) out += `${r > s.row || l > start ? "\n" : ""}${lines[l]}`;
+      last = { lines, to: Math.max(to, start - 1) };
+      continue;
+    }
+    last = undefined;
     if (r > s.row && !row.cont) out += "\n";
     out += sliceCols(row.text, r === s.row ? s.col : 0, r === e.row ? e.col + 1 : Number.POSITIVE_INFINITY);
   }
