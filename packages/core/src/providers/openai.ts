@@ -33,7 +33,7 @@ function toOpenAI(m: Message): OpenAI.ChatCompletionMessageParam[] {
         ...m.results.map((r) => ({
           role: "tool" as const,
           tool_call_id: r.id,
-          content: r.image ? "Image attached in the next message." : r.output,
+          content: r.image ? `${r.output ? `${r.output}\n\n` : ""}Image attached in the next message.` : r.output,
         })),
         ...(images.length ? [{ role: "user" as const, content: images }] : []),
       ];
@@ -129,7 +129,10 @@ function toResponses(m: Message, key: string): OpenAI.Responses.ResponseInputIte
         type: "function_call_output" as const,
         call_id: r.id,
         output: r.image
-          ? [{ type: "input_image" as const, image_url: `data:${r.image.mediaType};base64,${r.image.data}` }]
+          ? [
+              ...(r.output ? [{ type: "input_text" as const, text: r.output }] : []),
+              { type: "input_image" as const, image_url: `data:${r.image.mediaType};base64,${r.image.data}` },
+            ]
           : r.output,
       }));
   }

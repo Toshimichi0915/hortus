@@ -153,6 +153,8 @@ export async function createCli(session: Session, makeAgent: (observer: Plugin) 
     },
   });
 
+  void agent.mcpErrors?.().then((errors) => errors.length && push(...errors.map((e) => entry("error", e))));
+
   // later plugins win, so a command can be replaced by name (like tools)
   const commands = [
     ...new Map(

@@ -10,6 +10,10 @@ export interface Image {
   type: "image";
   mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
   data: string;
+  /** text sent along with the image, e.g. a codemode script's output */
+  text?: string;
+  /** where the image is on disk; a result's image without one is saved to a temp file */
+  path?: string;
 }
 export interface ToolResult {
   id: string;

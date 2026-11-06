@@ -55,7 +55,7 @@ function preview(text: string, n: number, fromEnd = false) {
 /** A tool call block like pi's: a one-line header, then a short preview of the input or result. */
 export function formatTool(call: ToolCall, result?: ToolResult): string {
   const i = (call.input ?? {}) as Record<string, unknown>;
-  const out = result && (result.image ? "[image]" : result.output);
+  const out = result && (result.image ? `${result.output ? `${result.output}\n` : ""}[image]` : result.output);
   let head: string;
   let body: string[] = [];
   if (call.name === "bash") {

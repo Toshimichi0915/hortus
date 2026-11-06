@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, join } from "node:path";
@@ -33,6 +34,14 @@ export function truncate(text: string, fromEnd = false) {
   if (fromEnd) kept.reverse();
   const truncated = kept.length < lines.length;
   return { content: truncated ? kept.join("\n") : text, shown: kept.length, total: lines.length, truncated, lines };
+}
+
+/** Writes `image` to a temp file so it can be opened or reused later; returns the path. */
+export function saveImage(image: Image): string {
+  const path = join(tmpdir(), `hortus-image-${randomUUID()}.${image.mediaType.split("/")[1]}`);
+  // sync, so codemode's image() can name the path in order; images are small enough
+  writeFileSync(path, Buffer.from(image.data, "base64"));
+  return path;
 }
 
 const limitNote = (shown: number) => (shown < MAX_LINES ? ` (${MAX_BYTES / 1024}KB limit)` : "");
@@ -158,7 +167,7 @@ export const readTool = tool({
   }),
   execute: async ({ path, offset, limit }) => {
     const mediaType = imageTypes[extname(path).toLowerCase()];
-    if (mediaType) return { type: "image", mediaType, data: await readFile(path, "base64") } satisfies Image;
+    if (mediaType) return { type: "image", mediaType, data: await readFile(path, "base64"), path } satisfies Image;
     const lines = (await readFile(path, "utf8")).split("\n");
     const start = offset ? offset - 1 : 0;
     if (start >= lines.length) throw new Error(`Offset ${offset} is beyond end of file (${lines.length} lines total)`);

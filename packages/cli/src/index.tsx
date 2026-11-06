@@ -51,6 +51,7 @@ await render(<App cli={cli} />, {
   // lets the terminal report Shift+Enter apart from Enter
   kittyKeyboard: { mode: "auto" },
 }).waitUntilExit();
+await cli.agent.close();
 // the alternate screen is gone on exit, so leave the conversation in normal scrollback
 for (const e of cli.ui.getState().entries)
   console.log(`${e.kind !== "info" && e.kind !== "error" ? "\n" : ""}${e.text}`);

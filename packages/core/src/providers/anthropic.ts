@@ -35,6 +35,7 @@ function toAnthropic(m: Message): Anthropic.MessageParam[] {
             tool_use_id: toolId(r.id),
             content: r.image
               ? [
+                  ...(r.output ? [{ type: "text" as const, text: r.output }] : []),
                   {
                     type: "image" as const,
                     source: { type: "base64" as const, media_type: r.image.mediaType, data: r.image.data },
