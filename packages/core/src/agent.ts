@@ -55,9 +55,10 @@ export async function createAgent(opts?: LoadOptions) {
     errors: [e.message],
     close: async () => {},
   }));
-  // codemode reaches every tool; MCP tools are then only listed in its description, not declared one by one
+  // codemode reaches every tool; MCP tools are then only listed in its description, not declared one by one. Without
+  // MCP tools it adds nothing, so it is left out.
   const tools = mcp.then(({ tools: mcpTools }) =>
-    config.codemode !== false
+    mcpTools.length > 0 && config.codemode !== false
       ? { declared: [...pluginTools, codemodeTool([...pluginTools, ...mcpTools])], codemodeOnly: mcpTools }
       : { declared: [...pluginTools, ...mcpTools], codemodeOnly: [] },
   );

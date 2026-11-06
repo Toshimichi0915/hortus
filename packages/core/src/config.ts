@@ -11,7 +11,7 @@ export const ConfigSchema = z.object({
   model: z.string().optional(),
   /** the CLI's initial effort; `/effort` and shift+tab save it here */
   effort: z.enum(EFFORTS).optional(),
-  /** the `codemode` tool, reaching MCP tools only through it (default); false declares each MCP tool instead */
+  /** the `codemode` tool, reaching any MCP tools only through it (default); false declares each instead */
   codemode: z.boolean().optional(),
 });
 export type Config = z.infer<typeof ConfigSchema>;
