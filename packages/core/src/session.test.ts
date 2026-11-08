@@ -3,6 +3,7 @@ import { appendFile, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { Message } from "./llm.ts";
 import { branch, listSessions, openSession, type SessionEntry, type SessionState } from "./session.ts";
 
 test("branch walks from the leaf to the root, skipping sibling branches", () => {
@@ -108,4 +109,11 @@ test("a line cut short by a crash is skipped, and the next entry starts on a lin
   const [after] = await listSessions(dir);
   assert.equal(after?.leafId, resumed.leafId);
   assert.equal((await openSession(after?.leafId ?? null, dir)).getState().messages.length, 2);
+});
+
+test("branch reads a line written before usage.cached became cacheRead", () => {
+  const usage = { input: 10, output: 5, cached: 4 };
+  const message = { role: "assistant", text: "", toolCalls: [], usage } as unknown as Message;
+  const { messages } = branch([{ v: 1, type: "message", id: "a", parentId: null, message }], "a");
+  assert.deepEqual(messages[0], { ...message, usage: { input: 10, output: 5, cacheRead: 4 } });
 });

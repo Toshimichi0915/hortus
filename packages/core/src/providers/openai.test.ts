@@ -54,7 +54,7 @@ test("openaiResponsesProvider streams a turn and replays its output only to the 
   );
   assert.deepEqual([text, thinking], [["Hello"], ["think"]]);
   assert.equal(assistant.text, "Hello");
-  assert.deepEqual(assistant.usage, { input: 10, output: 5, cached: 4 });
+  assert.deepEqual(assistant.usage, { input: 10, output: 5, cacheRead: 4 });
   assert.deepEqual(assistant.toolCalls, [
     { id: "call_1", name: "echo", input: { text: "hi" } },
     { id: "call_2", name: "echo", input: "{bad" },

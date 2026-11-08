@@ -22,11 +22,14 @@ export interface ToolResult {
   isError?: boolean;
 }
 
-/** Token counts of one completion; `input` includes `cached`. */
+/** Token counts of one completion; `input` includes `cacheRead` and `cacheWrite`. */
 export interface Usage {
   input: number;
   output: number;
-  cached: number;
+  /** read from the prompt cache */
+  cacheRead: number;
+  /** written to the prompt cache, which costs more than input; only where the provider reports it */
+  cacheWrite?: number;
 }
 
 export type Message =

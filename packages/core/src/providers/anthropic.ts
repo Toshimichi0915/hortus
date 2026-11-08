@@ -113,7 +113,8 @@ export function anthropicProvider(options?: ConstructorParameters<typeof Anthrop
         usage: {
           input: input_tokens + (cache_read_input_tokens ?? 0) + (cache_creation_input_tokens ?? 0),
           output: output_tokens,
-          cached: cache_read_input_tokens ?? 0,
+          cacheRead: cache_read_input_tokens ?? 0,
+          cacheWrite: cache_creation_input_tokens ?? 0,
         },
       };
     },

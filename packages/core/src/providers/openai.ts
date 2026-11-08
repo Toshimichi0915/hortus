@@ -88,7 +88,7 @@ export function openaiProvider(options?: ConstructorParameters<typeof OpenAI>[0]
         usage: usage && {
           input: usage.prompt_tokens,
           output: usage.completion_tokens,
-          cached: usage.prompt_tokens_details?.cached_tokens ?? 0,
+          cacheRead: usage.prompt_tokens_details?.cached_tokens ?? 0,
         },
         text: message?.content ?? "",
         toolCalls: (message?.tool_calls ?? []).flatMap((c) =>
@@ -200,7 +200,7 @@ export function openaiResponsesProvider(options?: ConstructorParameters<typeof O
         usage: usage && {
           input: usage.input_tokens,
           output: usage.output_tokens,
-          cached: usage.input_tokens_details?.cached_tokens ?? 0,
+          cacheRead: usage.input_tokens_details?.cached_tokens ?? 0,
         },
         text: output
           .flatMap((i) => (i.type === "message" ? i.content : []))

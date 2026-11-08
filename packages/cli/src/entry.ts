@@ -105,7 +105,7 @@ export function usageLine(messages: Message[], window?: number) {
   const last = usages.at(-1);
   const ctx = window ? `${pct(last ? last.input + last.output : 0, window)}/${(window / 1e6).toFixed(1)}M` : "-/-";
   const hit = pct(
-    sum((u) => u.cached),
+    sum((u) => u.cacheRead),
     input,
   );
   return `↑ ${k(input)} ↓ ${k(sum((u) => u.output))} ${ctx} CH ${hit}`;

@@ -3,7 +3,7 @@ import { appendFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { HORTUS_DIR } from "./config.ts";
-import type { Message } from "./llm.ts";
+import type { Message, Usage } from "./llm.ts";
 
 export const sessionsDir = join(HORTUS_DIR, "sessions");
 
@@ -44,9 +44,16 @@ interface Parser {
   apply(entry: any, state: SessionState): void;
 }
 
+/** `usage.cacheRead` was once `cached`, and session files keep what they were written with. */
+function renameCached(m: Message): Message {
+  if (m.role !== "assistant" || !m.usage || !("cached" in m.usage)) return m;
+  const { cached, ...usage } = m.usage as Usage & { cached: number };
+  return { ...m, usage: { ...usage, cacheRead: cached } };
+}
+
 /** A line is replayed by the parser matching its v and type; lines no parser knows are skipped. */
 const parsers: Parser[] = [
-  { v: 1, type: "message", apply: (e: { message: Message }, s) => s.messages.push(e.message) },
+  { v: 1, type: "message", apply: (e: { message: Message }, s) => s.messages.push(renameCached(e.message)) },
   {
     v: 1,
     type: "model",
