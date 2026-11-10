@@ -1,5 +1,5 @@
 import { dirname } from "node:path";
-import { EFFORTS, type Effort, listSessions, openSession } from "@hortus/core";
+import { EFFORTS, type Effort, expandSkill, listSessions, openSession, type Skill } from "@hortus/core";
 import { type Cli, supports } from "./cli.ts";
 import { stamp } from "./entry.ts";
 
@@ -39,6 +39,18 @@ export function parseCommand(input: string) {
 /** The command `name` runs: the one called that, else one with it as an alias. */
 export const findCommand = (commands: Command[], name: string) =>
   commands.find((c) => c.name === name) ?? commands.find((c) => c.aliases?.includes(name));
+
+/**
+ * `/skills:<name> [request]`, also run as `/<name>` unless a command is called that: a turn starting with the skill's
+ * instructions. Commands are matched by name before aliases, so a skill never shadows one.
+ */
+export const skillCommand = (skill: Skill): Command => ({
+  name: `skills:${skill.name}`,
+  aliases: [skill.name],
+  args: "[request]",
+  description: skill.description.replace(/\s+/g, " ").trim(),
+  run: async (arg, cli) => void cli.submit(await expandSkill(skill, arg)),
+});
 
 /** /new, /model, /effort and /resume. */
 export const builtinCommands: Command[] = [

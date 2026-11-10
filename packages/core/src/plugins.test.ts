@@ -40,7 +40,7 @@ test("loadPlugins merges plugins over the built-ins, dependencies first", async 
   await mkdir(join(dir, "not-a-plugin"));
   const extra = { on: { session_start: (s: { system: string[] }) => void s.system.push("extra") } };
   const { providers, tools, emit, plugins } = await loadPlugins(dir, { extra: [extra] });
-  const start = { system: [] as string[] };
+  const start = { system: [] as string[], skills: [] };
   await emit("session_start", start);
   assert.deepEqual(start.system.slice(1), ["from b", "from a", "extra"]);
   assert.match(start.system[0] ?? "", /coding agent/);

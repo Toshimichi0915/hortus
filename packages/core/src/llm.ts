@@ -93,10 +93,23 @@ export interface ProviderDef {
   create: (secret: { apiKey: string; endpoint?: string }) => Provider;
 }
 
+/** An Agent Skills (agentskills.io) skill: the model is told its name and description, and reads `path` when it applies. */
+export interface Skill {
+  name: string;
+  description: string;
+  /** its SKILL.md; relative paths in it resolve against its directory */
+  path: string;
+}
+
 /** Payload of each event; handlers may mutate it (e.g. push to `system`). */
 export interface Events {
-  /** fired at the start of every agent run; parts are joined into the system prompt */
-  session_start: { system: string[] };
+  /**
+   * fired whenever the skills are listed (every run, and by hosts): builtin pushes those found on disk, later plugins may
+   * push, remove or replace any; one per name, the last one wins
+   */
+  skills: { skills: Skill[] };
+  /** fired at the start of every agent run, after `skills`; parts are joined into the system prompt */
+  session_start: { system: string[]; skills: Skill[] };
   /** streamed assistant text delta */
   text: string;
   /** streamed reasoning delta, when the provider exposes it */

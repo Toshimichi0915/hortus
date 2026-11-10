@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -177,4 +177,30 @@ test("a command can start a turn, and the session isn't swapped while one runs",
   assert.throws(() => cli.setSession(session), /while a turn is running/);
   await sleep(50);
   assert.deepEqual(session.getState().messages, [{ role: "user", content: "review this" }]);
+});
+
+test("a skill runs as /skills:<name> and /<name>, without shadowing a command, and plugins' changes show up", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hortus-"));
+  const session = await openSession(null, dir);
+  const path = join(dir, "SKILL.md");
+  await writeFile(path, "---\ndescription: Review code\n---\nReview carefully.\n");
+  let list = [
+    { name: "review", description: "Review code", path },
+    { name: "model", description: "shadowed", path },
+  ];
+  const agent = { plugins: [], resolve, run: async () => {}, skills: async () => list };
+  const cli = await createCli(session, async () => agent as unknown as Agent);
+  await sleep(10);
+  const body = `<skill name="review" location="${path}">\nReferences are relative to ${dir}.\n\nReview carefully.\n</skill>`;
+  // the transcript shows the skill's name; the model gets its instructions
+  assert.equal(await send(cli, "/skills:review src"), "user: \n[skill] review\n\nsrc\n");
+  assert.equal(await send(cli, "/review"), "user: \n[skill] review\n");
+  assert.deepEqual(
+    session.getState().messages.map((m) => m.role === "user" && m.content),
+    [`${body}\n\nsrc`, body],
+  );
+  assert.equal(findCommand(cli.commands, "model")?.name, "model");
+  list = [];
+  assert.equal(await send(cli, "hi"), "user: \nhi\n");
+  assert.equal(cli.submit("/review"), false);
 });

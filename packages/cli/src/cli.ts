@@ -5,13 +5,14 @@ import {
   loadConfig,
   type Message,
   type Plugin,
-  saveConfig,
+  parseSkillMessage,
   type Session,
+  saveConfig,
   type ToolCall,
 } from "@hortus/core";
 import { createStore } from "zustand/vanilla";
 import type { CliPlugin } from "./api.ts";
-import { builtinCommands, type Command, findCommand, parseCommand } from "./commands.ts";
+import { builtinCommands, type Command, findCommand, parseCommand, skillCommand } from "./commands.ts";
 import { type Entry, entry, formatTool } from "./entry.ts";
 
 /** What the TUI shows; written only by `createCli`, read through `useUi`. */
@@ -38,12 +39,19 @@ export const supports = (s: UiState, effort: Effort) => s.status?.efforts?.inclu
 /** The effort runs use: the one set, unless the model doesn't take it (kept from another model) and would reject it. */
 export const runEffort = (s: UiState) => (s.effort && supports(s, s.effort) ? s.effort : undefined);
 
+/** A user message's transcript entry; a skill's instructions (see `expandSkill`) show as just its name. */
+function userEntry(text: string): Entry {
+  const skill = parseSkillMessage(text);
+  // blank rows pad the message's background, as pi does
+  return entry("user", `\n${skill ? `[skill] ${skill.name}${skill.request ? `\n\n${skill.request}` : ""}` : text}\n`);
+}
+
 /** Transcript entries for messages already in the session, so a resumed one shows as it was left. */
 export function replay(messages: Message[]): Entry[] {
   const out: Entry[] = [];
   const calls = new Map<string, ToolCall>();
   for (const m of messages) {
-    if (m.role === "user") out.push(entry("user", `\n${m.content}\n`));
+    if (m.role === "user") out.push(userEntry(m.content));
     else if (m.role === "assistant") {
       if (m.text) out.push(entry("assistant", m.text));
       for (const c of m.toolCalls) calls.set(c.id, c);
@@ -156,7 +164,7 @@ export async function createCli(session: Session, makeAgent: (observer: Plugin) 
   void agent.mcpErrors?.().then((errors) => errors.length && push(...errors.map((e) => entry("error", e))));
 
   // later plugins win, so a command can be replaced by name (like tools)
-  const commands = [
+  const pluginCommands = [
     ...new Map(
       [...builtinCommands, ...(agent.plugins as CliPlugin[]).flatMap((p) => p.cli?.commands ?? [])].map((c) => [
         c.name,
@@ -164,6 +172,13 @@ export async function createCli(session: Session, makeAgent: (observer: Plugin) 
       ]),
     ).values(),
   ];
+  // plugins may add or remove skills at any time, so they're listed again whenever a prompt has been handled; last, so
+  // their `/<name>` aliases lose to every other command's
+  let commands = pluginCommands;
+  const refreshSkills = async () => {
+    commands = [...pluginCommands, ...((await agent.skills?.()) ?? []).map(skillCommand)];
+  };
+  void refreshSkills().catch((e) => push(entry("error", `Listing skills failed: ${errorText(e)}`)));
 
   // re-resolved whenever the session, or its model or provider, changes
   let seq = 0;
@@ -201,8 +216,7 @@ export async function createCli(session: Session, makeAgent: (observer: Plugin) 
   async function run(value: string) {
     const { session } = ui.getState();
     const turn: Message[] = [{ role: "user", content: value }];
-    // blank rows pad the message's background, as pi does
-    ui.setState((s) => ({ busy: true, turn, entries: [...s.entries, entry("user", `\n${value}\n`)] }));
+    ui.setState((s) => ({ busy: true, turn, entries: [...s.entries, userEntry(value)] }));
     const abort = new AbortController();
     aborter = abort;
     try {
@@ -256,8 +270,10 @@ export async function createCli(session: Session, makeAgent: (observer: Plugin) 
     get session() {
       return ui.getState().session;
     },
-    /** the built-ins and every plugin's `cli.commands`, one per name */
-    commands,
+    /** the built-ins and every plugin's `cli.commands`, one per name, then one per skill (see `skillCommand`) */
+    get commands() {
+      return commands;
+    },
     /**
      * starts `value` as a command or the next turn; false (the prompt keeps its input) when blank, still running or an
      * unknown command
@@ -271,7 +287,9 @@ export async function createCli(session: Session, makeAgent: (observer: Plugin) 
         return false;
       }
       ui.setState({ copied: undefined });
-      (c ? command(c, cmd?.arg ?? "") : run(value)).catch((e) => push(entry("error", errorText(e))));
+      (c ? command(c, cmd?.arg ?? "") : run(value))
+        .then(refreshSkills)
+        .catch((e) => push(entry("error", errorText(e))));
       return true;
     },
     abort: () => aborter?.abort(),

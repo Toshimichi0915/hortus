@@ -1,6 +1,6 @@
 import { codemodeTool } from "./codemode.ts";
 import { loadConfig } from "./config.ts";
-import type { Effort, Image, Message, Tool, ToolCall, ToolResult } from "./llm.ts";
+import type { Effort, Image, Message, Skill, Tool, ToolCall, ToolResult } from "./llm.ts";
 import { connectMcp, loadMcpConfig } from "./mcp.ts";
 import { type LoadOptions, loadPlugins } from "./plugins.ts";
 import { loadSecrets } from "./secrets.ts";
@@ -92,11 +92,18 @@ export async function createAgent(opts?: LoadOptions) {
     return lists.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
   }
 
+  /** The skills plugins offer now (see the `skills` event), one per name, the last one pushed winning. */
+  async function skills(): Promise<Skill[]> {
+    const p = { skills: [] as Skill[] };
+    await emit("skills", p);
+    return [...new Map(p.skills.map((s) => [s.name, s])).values()];
+  }
+
   /** Runs the tool loop on top of `history` until the model stops calling tools. `model`/`provider` override the config. */
   async function run(history: Message[], opts: RunOptions = {}): Promise<void> {
     const { model, provider } = await resolve(opts);
     const { declared: runTools, codemodeOnly } = await tools;
-    const start = { system: [] as string[] };
+    const start = { system: [] as string[], skills: await skills() };
     await emit("session_start", start);
     const system = start.system.join("\n\n");
     const messages = [...history];
@@ -126,6 +133,7 @@ export async function createAgent(opts?: LoadOptions) {
     plugins,
     resolve,
     listModels,
+    skills,
     run,
     /** MCP connection errors, one line per server, once every server has connected or failed */
     mcpErrors: () => mcp.then((m) => m.errors),

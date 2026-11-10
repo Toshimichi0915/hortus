@@ -1,0 +1,138 @@
+import { readdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { parse } from "yaml";
+import { HORTUS_DIR } from "./config.ts";
+import type { Skill } from "./llm.ts";
+
+/** How deep under a skills root a SKILL.md is looked for. */
+const MAX_DEPTH = 6;
+
+const exists = (path: string) =>
+  stat(path).then(
+    () => true,
+    () => false,
+  );
+
+/**
+ * `cwd` and its ancestors up to the nearest one with a `.git` (a file in worktrees and submodules), root first;
+ * just `cwd` outside a repository, so nothing from an unrelated parent (like `~`) is picked up.
+ */
+export async function projectDirs(cwd = process.cwd()): Promise<string[]> {
+  const dirs: string[] = [];
+  for (let dir = cwd; ; dir = dirname(dir)) {
+    dirs.unshift(dir);
+    if (await exists(join(dir, ".git"))) return dirs;
+    if (dirname(dir) === dir) return [cwd];
+  }
+}
+
+/** `~/.hortus/AGENTS.md`, then the `AGENTS.md` of each of `projectDirs`, root first, so the most specific comes last. */
+export async function loadAgentsMd(cwd = process.cwd()): Promise<{ path: string; content: string }[]> {
+  const paths = new Set([join(HORTUS_DIR, "AGENTS.md"), ...(await projectDirs(cwd)).map((d) => join(d, "AGENTS.md"))]);
+  const files = await Promise.all(
+    [...paths].map(async (path) => {
+      try {
+        return { path, content: await readFile(path, "utf8") };
+      } catch (e) {
+        if (["ENOENT", "ENOTDIR", "EISDIR"].includes((e as NodeJS.ErrnoException).code ?? "")) return undefined;
+        throw e;
+      }
+    }),
+  );
+  return files.filter((f) => f !== undefined);
+}
+
+/** YAML frontmatter (`---` lines) and the rest. */
+function splitFrontmatter(text: string): { meta: Record<string, unknown>; body: string } {
+  const m = text.match(/^﻿?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!m) return { meta: {}, body: text };
+  const meta: unknown = parse(m[1] ?? "");
+  return {
+    meta: meta && typeof meta === "object" ? (meta as Record<string, unknown>) : {},
+    body: text.slice(m[0].length),
+  };
+}
+
+/** The skill a SKILL.md declares; `name` defaults to its directory's name. Undefined without a `description`. */
+export async function readSkill(path: string): Promise<Skill | undefined> {
+  const { meta } = splitFrontmatter(await readFile(path, "utf8"));
+  const { name, description } = meta;
+  if (typeof description !== "string" || !description.trim()) return undefined;
+  return { name: typeof name === "string" && name ? name : basename(dirname(path)), description, path };
+}
+
+/** SKILL.md files under `dir`; a directory with one is a skill, so nothing below it is searched. */
+async function findSkillFiles(dir: string, depth = 0): Promise<string[]> {
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  if (entries.some((e) => e.name === "SKILL.md" && !e.isDirectory())) return [join(dir, "SKILL.md")];
+  if (depth >= MAX_DEPTH) return [];
+  // symlinks are followed (skills are often linked in); one to a file fails readdir and is skipped
+  const subdirs = entries
+    .filter((e) => !e.name.startsWith(".") && e.name !== "node_modules" && (e.isDirectory() || e.isSymbolicLink()))
+    .map((e) => e.name)
+    .sort();
+  return (await Promise.all(subdirs.map((name) => findSkillFiles(join(dir, name), depth + 1)))).flat();
+}
+
+/** Skills in `~/.hortus/skills`, `~/.agents/skills`, then the `.agents/skills` of each of `projectDirs`, root first. */
+export async function discoverSkills(cwd = process.cwd()): Promise<Skill[]> {
+  const roots = new Set([
+    join(HORTUS_DIR, "skills"),
+    join(homedir(), ".agents", "skills"),
+    ...(await projectDirs(cwd)).map((d) => join(d, ".agents", "skills")),
+  ]);
+  const files = (await Promise.all([...roots].map((r) => findSkillFiles(r)))).flat();
+  // ponytail: an unreadable or invalid SKILL.md is skipped silently; report them (like mcpErrors) if that confuses
+  const skills = await Promise.all(files.map((f) => readSkill(f).catch(() => undefined)));
+  return skills.filter((s) => s !== undefined);
+}
+
+/** A user message running `skill`: its instructions without the frontmatter, then `request`. */
+export async function expandSkill(skill: Skill, request = ""): Promise<string> {
+  const { body } = splitFrontmatter(await readFile(skill.path, "utf8"));
+  const block = `<skill name="${skill.name}" location="${skill.path}">\nReferences are relative to ${dirname(skill.path)}.\n\n${body.trim()}\n</skill>`;
+  return request.trim() ? `${block}\n\n${request.trim()}` : block;
+}
+
+/** The skill name and request of a message made by `expandSkill`, so a host can show it without the instructions. */
+export function parseSkillMessage(text: string): { name: string; request: string } | undefined {
+  const m = text.match(/^<skill name="([^"]*)" location="[^"]*">\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]+))?$/);
+  return m ? { name: m[1] ?? "", request: m[2] ?? "" } : undefined;
+}
+
+const escapeXml = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/** The system prompt parts for AGENTS.md files and skills (the agentskills.io format); empty ones are left out. */
+export function contextPrompt(agentsMd: { path: string; content: string }[], skills: Skill[]): string[] {
+  const parts = [
+    "AGENTS.md files hold instructions for the directory tree they're in, deeper ones taking precedence. Those from the project root down to the working directory are below; when working elsewhere, check for any that apply.",
+  ];
+  if (agentsMd.length)
+    parts.push(
+      [
+        "Project-specific instructions and guidelines:",
+        ...agentsMd.map((f) => `<project_instructions path="${f.path}">\n${f.content.trim()}\n</project_instructions>`),
+      ].join("\n\n"),
+    );
+  if (skills.length)
+    parts.push(
+      [
+        "The following skills provide specialized instructions for specific tasks. When a task matches a skill's description, read its file and follow it. Resolve relative paths in it against the skill's directory (the parent of SKILL.md).",
+        "",
+        "<available_skills>",
+        ...skills.map(
+          (s) =>
+            `  <skill>\n    <name>${escapeXml(s.name)}</name>\n    <description>${escapeXml(s.description.trim())}</description>\n    <location>${escapeXml(s.path)}</location>\n  </skill>`,
+        ),
+        "</available_skills>",
+      ].join("\n"),
+    );
+  return parts;
+}

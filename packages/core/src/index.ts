@@ -2,6 +2,7 @@ export * from "./agent.ts";
 export * from "./builtin.ts";
 export * from "./codemode.ts";
 export * from "./config.ts";
+export * from "./context.ts";
 export * from "./llm.ts";
 export * from "./mcp.ts";
 export * from "./plugins.ts";
