@@ -1,13 +1,32 @@
 import { codemodeTool } from "./codemode.ts";
 import { loadConfig } from "./config.ts";
-import type { Effort, Image, Message, Skill, Tool, ToolCall, ToolResult } from "./llm.ts";
+import type { Effort, Image, Message, Skill, Tool, ToolCall, ToolContext, ToolResult } from "./llm.ts";
 import { connectMcp, loadMcpConfig } from "./mcp.ts";
 import { type LoadOptions, loadPlugins } from "./plugins.ts";
 import { loadSecrets } from "./secrets.ts";
 import { saveImage } from "./tools.ts";
 
-/** Runs `call` with one of `tools`; a call to a tool in `codemodeOnly` is told how to reach it instead. */
-export async function runTool(tools: Tool[], call: ToolCall, codemodeOnly: Tool[] = []): Promise<ToolResult> {
+/**
+ * Runs `call` with one of `tools`; a call to a tool in `codemodeOnly` is told how to reach it instead. Each
+ * `ToolContext.update` goes to `onUpdate`, and the last one becomes the result's `details`.
+ */
+export async function runTool(
+  tools: Tool[],
+  call: ToolCall,
+  codemodeOnly: Tool[] = [],
+  onUpdate: (details: unknown) => void = () => {},
+): Promise<ToolResult> {
+  let details: unknown;
+  const result = await execute(tools, call, codemodeOnly, {
+    update: (d) => {
+      details = d;
+      onUpdate(d);
+    },
+  });
+  return details === undefined ? result : { ...result, details };
+}
+
+async function execute(tools: Tool[], call: ToolCall, codemodeOnly: Tool[], ctx: ToolContext): Promise<ToolResult> {
   const t = tools.find((t) => t.name === call.name);
   if (!t) {
     const hint = codemodeOnly.some((t) => t.name === call.name)
@@ -18,7 +37,7 @@ export async function runTool(tools: Tool[], call: ToolCall, codemodeOnly: Tool[
   const input = t.inputSchema.safeParse(call.input);
   if (!input.success) return { id: call.id, output: `Invalid input: ${input.error.message}`, isError: true };
   try {
-    const output = await t.execute(input.data as never);
+    const output = await t.execute(input.data as never, ctx);
     if ((output as Image | undefined)?.type === "image") {
       const { text = "", ...image } = output as Image;
       if (image.path) return { id: call.id, output: text, image };
@@ -121,7 +140,11 @@ export async function createAgent(opts?: LoadOptions) {
       for (const call of assistant.toolCalls) await emit("tool_call", call);
       const results: Message = {
         role: "tool",
-        results: await Promise.all(assistant.toolCalls.map((c) => runTool(runTools, c, codemodeOnly))),
+        results: await Promise.all(
+          assistant.toolCalls.map((c) =>
+            runTool(runTools, c, codemodeOnly, (details) => void emit("tool_update", { id: c.id, details })),
+          ),
+        ),
       };
       messages.push(results);
       await emit("message", results);

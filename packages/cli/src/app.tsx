@@ -1,12 +1,23 @@
-import { Box, type BoxProps, type DOMElement, Text, useApp, useBoxMetrics, useInput, useWindowSize } from "ink";
-import { Component, type ComponentType, type ReactNode, useMemo, useRef, useState } from "react";
+import {
+  Box,
+  type BoxProps,
+  type DOMElement,
+  renderToString,
+  Text,
+  useApp,
+  useBoxMetrics,
+  useInput,
+  useWindowSize,
+} from "ink";
+import { Component, type ReactNode, useMemo, useRef, useState } from "react";
 import { CliContext, type CliPlugin, type Slots, useUi } from "./api.ts";
 import type { Cli } from "./cli.ts";
 import { CommandMenu, useCommandMenu } from "./command-menu.tsx";
 import { theme } from "./entry.ts";
 import { PromptInput } from "./prompt-input.tsx";
 import { StatusBar } from "./status-bar.tsx";
-import { Transcript } from "./transcript.tsx";
+import { builtinTools, genericTool, type ToolBlock, type ToolView } from "./tools.tsx";
+import { type ToolLookup, Transcript } from "./transcript.tsx";
 
 /** Clips children to its own height. `fromBottom` = rows scrolled up from the end, so 0 follows new content. */
 function ScrollBox({ fromBottom, children, ...props }: BoxProps & { fromBottom: number; children: ReactNode }) {
@@ -35,7 +46,7 @@ const INPUT_ROWS = 8;
 
 /** A throwing plugin component falls back to the one it replaced instead of taking the whole TUI down. */
 class Guard extends Component<
-  { fallback: ComponentType; onError: (e: unknown) => void; children: ReactNode },
+  { fallback: () => ReactNode; onError: (e: unknown) => void; children: ReactNode },
   { failed: boolean }
 > {
   override state = { failed: false };
@@ -44,10 +55,11 @@ class Guard extends Component<
     this.props.onError(e);
   }
   override render() {
-    const Fallback = this.props.fallback;
-    return this.state.failed ? <Fallback /> : this.props.children;
+    return this.state.failed ? this.props.fallback() : this.props.children;
   }
 }
+
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** Built-in slots, each wrapped by every plugin's override in load order (later plugins end up outermost). */
 export function composeSlots(plugins: CliPlugin[], onError: (text: string) => void): Slots {
@@ -57,10 +69,9 @@ export function composeSlots(plugins: CliPlugin[], onError: (text: string) => vo
       const Override = cli?.[k];
       if (!Override) continue;
       const Default = slots[k];
-      const fail = (e: unknown) =>
-        onError(`${k} plugin failed, showing the one it replaced: ${e instanceof Error ? e.message : String(e)}`);
+      const fail = (e: unknown) => onError(`${k} plugin failed, showing the one it replaced: ${message(e)}`);
       slots[k] = () => (
-        <Guard fallback={Default} onError={fail}>
+        <Guard fallback={() => <Default />} onError={fail}>
           <Override Default={Default} />
         </Guard>
       );
@@ -68,17 +79,76 @@ export function composeSlots(plugins: CliPlugin[], onError: (text: string) => vo
   return slots;
 }
 
-/** The TUI; plugins' `cli` overrides are composed once into the slots it renders. */
+/**
+ * Each tool's renderer: the built-in one for its name (else the generic one), wrapped by every plugin's `cli.tools`
+ * override for that name in load order. An override that throws falls back to the one it replaced, reported once per
+ * tool; one without `text` is copied as `renderToString` of what it draws, with `cli` as its context.
+ */
+export function composeTools(plugins: CliPlugin[], cli: Cli | undefined, onError: (text: string) => void): ToolLookup {
+  const composed = new Map<string, ToolBlock>();
+  const compose = (name: string) => {
+    let current = builtinTools[name] ?? genericTool;
+    let reported = false;
+    const fail = (e: unknown) => {
+      if (reported) return;
+      reported = true;
+      onError(`${name} renderer failed, showing the one it replaced: ${message(e)}`);
+    };
+    for (const { cli: c } of plugins) {
+      const override = c?.tools?.[name];
+      if (!override) continue;
+      const { Render: Default, text: fallbackText } = current;
+      const Override = override.Render;
+      // biome-ignore lint/correctness/noComponentHookFactories: made once per tool name (cached below), so it's stable
+      const Render = (view: ToolView) => (
+        <Guard fallback={() => <Default {...view} />} onError={fail}>
+          <Override {...view} Default={Default} />
+        </Guard>
+      );
+      const text =
+        override.text ??
+        ((view: ToolView) =>
+          renderToString(
+            <CliContext value={cli}>
+              <Render {...view} />
+            </CliContext>,
+            { columns: view.width },
+          ));
+      current = {
+        Render,
+        text: (view) => {
+          try {
+            return text(view);
+          } catch (e) {
+            fail(e);
+            return fallbackText(view);
+          }
+        },
+      };
+    }
+    return current;
+  };
+  return (name) => {
+    const hit = composed.get(name);
+    if (hit) return hit;
+    const r = compose(name);
+    composed.set(name, r);
+    return r;
+  };
+}
+
+/** The TUI; plugins' `cli` overrides are composed once into the slots and tool renderers it uses. */
 export function App({ cli }: { cli: Cli }) {
   const slots = useMemo(() => composeSlots(cli.agent.plugins as CliPlugin[], cli.report), [cli]);
+  const tools = useMemo(() => composeTools(cli.agent.plugins as CliPlugin[], cli, cli.report), [cli]);
   return (
     <CliContext value={cli}>
-      <Layout cli={cli} slots={slots} />
+      <Layout cli={cli} slots={slots} tools={tools} />
     </CliContext>
   );
 }
 
-function Layout({ cli, slots }: { cli: Cli; slots: Slots }) {
+function Layout({ cli, slots, tools }: { cli: Cli; slots: Slots; tools: ToolLookup }) {
   const entries = useUi((s) => s.entries);
   const live = useUi((s) => s.live);
   const busy = useUi((s) => s.busy);
@@ -122,6 +192,7 @@ function Layout({ cli, slots }: { cli: Cli; slots: Slots }) {
         // another session (/new) starts unscrolled, with nothing selected
         key={path}
         entries={shown}
+        tools={tools}
         onWheelBelow={(delta) => setInScroll((n) => clamp(n + delta))}
         onCopy={cli.setCopied}
       />

@@ -3,8 +3,9 @@ import { test } from "node:test";
 import { Box, renderToString, Text } from "ink";
 import { createStore } from "zustand/vanilla";
 import { CliContext, type CliPlugin } from "./api.ts";
-import { composeSlots } from "./app.tsx";
+import { composeSlots, composeTools } from "./app.tsx";
 import type { Cli } from "./cli.ts";
+import { linesRenderer, type ToolView } from "./tools.tsx";
 
 // just enough of a Cli for the built-in status bar to render
 const cli = {
@@ -54,4 +55,68 @@ test("a throwing override falls back to the one it replaced and reports why", ()
   };
   assert.deepEqual(render([wrap("a"), boom], (e) => errors.push(e)).slice(0, 1), ["a"]);
   assert.deepEqual(errors, ["statusBar plugin failed, showing the one it replaced: boom"]);
+});
+
+const view = (name: string): ToolView => ({ call: { id: "1", name, input: { command: "ls" } }, width: 30 });
+const draw = (tools: ReturnType<typeof composeTools>, v: ToolView) => {
+  const { Render } = tools(v.call.name);
+  return renderToString(
+    <CliContext value={cli}>
+      <Render {...v} />
+    </CliContext>,
+    { columns: v.width },
+  );
+};
+// a component renderer adding a line above the one it replaced, without `text`
+const above = (line: string): CliPlugin => ({
+  cli: {
+    tools: {
+      bash: {
+        // biome-ignore lint/correctness/noComponentHookFactories: one renderer per plugin, made once per test
+        Render: ({ Default, ...v }) => (
+          <Box flexDirection="column">
+            <Text>{line}</Text>
+            <Default {...v} />
+          </Box>
+        ),
+      },
+    },
+  },
+});
+
+test("composeTools wraps a tool's built-in renderer in load order, and copies a renderer without text as it draws", () => {
+  const tools = composeTools([above("a"), {}, above("b")], cli, assert.fail);
+  assert.equal(draw(tools, view("bash")), "b\na\n$ ls");
+  assert.equal(tools("bash").text(view("bash")), "b\na\n$ ls");
+  // other tools keep their own renderer; one without any gets the generic one
+  assert.equal(tools("read").text(view("read")), "read undefined");
+  assert.equal(draw(tools, view("mcp__x__y")), 'mcp__x__y {"command":"ls"}');
+  // a renderer's own text is used as is
+  const own = linesRenderer(() => [[{ text: "drawn" }]]);
+  const withText = composeTools([{ cli: { tools: { bash: { ...own, text: () => "copied" } } } }], cli, assert.fail);
+  assert.equal(withText("bash").text(view("bash")), "copied");
+});
+
+const throwingTool: CliPlugin = {
+  cli: {
+    tools: {
+      bash: {
+        Render: () => {
+          throw new Error("boom");
+        },
+        text: () => {
+          throw new Error("boom");
+        },
+      },
+    },
+  },
+};
+
+test("a throwing tool renderer falls back to the one it replaced, reported once however many blocks use it", () => {
+  const errors: string[] = [];
+  const tools = composeTools([above("a"), throwingTool], cli, (e) => errors.push(e));
+  assert.equal(draw(tools, view("bash")), "a\n$ ls");
+  assert.equal(draw(tools, view("bash")), "a\n$ ls");
+  assert.equal(tools("bash").text(view("bash")), "a\n$ ls");
+  assert.deepEqual(errors, ["bash renderer failed, showing the one it replaced: boom"]);
 });

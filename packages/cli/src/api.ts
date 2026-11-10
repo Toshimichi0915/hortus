@@ -3,12 +3,15 @@ import { type ComponentType, createContext, useContext } from "react";
 import { useStore } from "zustand";
 import type { Cli, UiState } from "./cli.ts";
 import type { Command } from "./commands.ts";
+import type { ToolRenderer } from "./tools.tsx";
 
 export type { SessionState } from "@hortus/core";
 export { useShallow } from "zustand/react/shallow";
 export type { Cli, UiState } from "./cli.ts";
 export type { Candidate, Command } from "./commands.ts";
 export { theme, usageLine } from "./entry.ts";
+export type { Span } from "./markdown.ts";
+export { linesRenderer, type ToolBlock, type ToolRenderer, type ToolView } from "./tools.tsx";
 
 /** UI parts a plugin can replace. */
 export interface Slots {
@@ -21,6 +24,11 @@ export interface CliPlugin extends Plugin {
   cli?: { [K in keyof Slots]?: ComponentType<{ Default: Slots[K] }> } & {
     /** added to the `/` menu; one named like an earlier command (built-in or plugin) replaces it */
     commands?: Command[];
+    /**
+     * tool call blocks by tool name (an MCP tool's is `mcp__<server>__<tool>`), wrapping the built-in or an earlier
+     * plugin's renderer for that name, which each gets as `Default`; the generic one draws tools without any
+     */
+    tools?: Record<string, ToolRenderer>;
   };
 }
 

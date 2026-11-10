@@ -13,7 +13,7 @@ import {
 import { createStore } from "zustand/vanilla";
 import type { CliPlugin } from "./api.ts";
 import { builtinCommands, type Command, findCommand, parseCommand, skillCommand } from "./commands.ts";
-import { type Entry, entry, formatTool } from "./entry.ts";
+import { type Entry, entry, type ToolEntry, toolEntry } from "./entry.ts";
 
 /** What the TUI shows; written only by `createCli`, read through `useUi`. */
 export interface UiState {
@@ -40,7 +40,7 @@ export const supports = (s: UiState, effort: Effort) => s.status?.efforts?.inclu
 export const runEffort = (s: UiState) => (s.effort && supports(s, s.effort) ? s.effort : undefined);
 
 /** A user message's transcript entry; a skill's instructions (see `expandSkill`) show as just its name. */
-function userEntry(text: string): Entry {
+function userEntry(text: string) {
   const skill = parseSkillMessage(text);
   // blank rows pad the message's background, as pi does
   return entry("user", `\n${skill ? `[skill] ${skill.name}${skill.request ? `\n\n${skill.request}` : ""}` : text}\n`);
@@ -58,7 +58,7 @@ export function replay(messages: Message[]): Entry[] {
     } else
       for (const r of m.results) {
         const c = calls.get(r.id);
-        if (c) out.push(entry(r.isError ? "toolError" : "toolOk", formatTool(c, r)));
+        if (c) out.push(toolEntry(c, r));
       }
   }
   return out;
@@ -132,28 +132,20 @@ export async function createCli(session: Session, makeAgent: (observer: Plugin) 
     });
   };
 
-  // pending tool blocks by call id, replaced by their result block when it arrives
-  const calls = new Map<string, { call: ToolCall; entry: Entry }>();
+  // a running call's block (one without a result yet), replaced by `f(block)`
+  const updateTool = (id: string, f: (e: ToolEntry) => ToolEntry) =>
+    ui.setState((s) => ({
+      entries: s.entries.map((e) => (e.kind === "tool" && !e.result && e.call.id === id ? f(e) : e)),
+    }));
   const agent = await makeAgent({
     on: {
       thinking: (delta) => stream("thinking", delta),
       text: (delta) => stream("text", delta),
-      tool_call: (call) => {
-        const e = entry("tool", formatTool(call));
-        calls.set(call.id, { call, entry: e });
-        push(e);
-      },
+      tool_call: (call) => push(toolEntry(call)),
+      tool_update: ({ id, details }) => updateTool(id, (e) => ({ ...e, details })),
       message: (message) => {
-        if (message.role === "tool") {
-          const done = new Map<Entry, Entry>();
-          for (const r of message.results) {
-            const c = calls.get(r.id);
-            if (!c) continue;
-            done.set(c.entry, { ...c.entry, kind: r.isError ? "toolError" : "toolOk", text: formatTool(c.call, r) });
-            calls.delete(r.id);
-          }
-          ui.setState((s) => ({ entries: s.entries.map((e) => done.get(e) ?? e) }));
-        }
+        if (message.role === "tool")
+          for (const r of message.results) updateTool(r.id, (e) => ({ ...e, result: r, details: r.details }));
         // an assistant message closes the streamed thinking and text
         flush();
         ui.setState((s) => ({ turn: [...s.turn, message] }));

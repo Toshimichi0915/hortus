@@ -1,14 +1,28 @@
 import type { Message, ToolCall, ToolResult } from "@hortus/core";
 
-export interface Entry {
+/** A transcript entry shown as (wrapped) text. */
+export interface TextEntry {
   id: number;
-  kind: "info" | "user" | "thinking" | "assistant" | "tool" | "toolOk" | "toolError" | "error";
+  kind: "info" | "user" | "thinking" | "assistant" | "error";
   text: string;
 }
+/** A tool call's block, drawn by its tool's renderer (see `ToolRenderer`); replaced as updates and the result arrive. */
+export interface ToolEntry {
+  id: number;
+  kind: "tool";
+  call: ToolCall;
+  result?: ToolResult;
+  /** the latest `tool_update` while running, then the result's `details` */
+  details?: unknown;
+}
+export type Entry = TextEntry | ToolEntry;
 
 let nextId = 0;
-export function entry(kind: Entry["kind"], text: string): Entry {
+export function entry(kind: TextEntry["kind"], text: string): TextEntry {
   return { id: nextId++, kind, text };
+}
+export function toolEntry(call: ToolCall, result?: ToolResult): ToolEntry {
+  return { id: nextId++, kind: "tool", call, result, details: result?.details };
 }
 
 interface Style {
@@ -32,62 +46,16 @@ export const theme = {
   thinking: "#96a0a4",
 };
 
-export const styles: Record<Entry["kind"], Style> = {
+export const styles: Record<TextEntry["kind"], Style> = {
   info: { color: theme.dim },
   user: { color: theme.text, backgroundColor: "#213b49" },
   thinking: { color: theme.thinking, italic: true },
   assistant: {},
-  // pending / success / error tool blocks
-  tool: { backgroundColor: "#34383a" },
-  toolOk: { backgroundColor: "#254131" },
-  toolError: { backgroundColor: "#5b282a" },
   error: { color: theme.red },
 };
 
-/** Keeps the first (or last) `n` lines, noting how many were cut. */
-function preview(text: string, n: number, fromEnd = false) {
-  const lines = text.replace(/\n$/, "").split("\n");
-  if (lines.length <= n) return lines;
-  const more = `... (${lines.length - n} ${fromEnd ? "earlier" : "more"} lines)`;
-  return fromEnd ? [more, ...lines.slice(-n)] : [...lines.slice(0, n), more];
-}
-
-/** A tool call block like pi's: a one-line header, then a short preview of the input or result. */
-export function formatTool(call: ToolCall, result?: ToolResult): string {
-  const i = (call.input ?? {}) as Record<string, unknown>;
-  const out = result && (result.image ? `${result.output ? `${result.output}\n` : ""}[image]` : result.output);
-  let head: string;
-  let body: string[] = [];
-  if (call.name === "bash") {
-    head = `$ ${i.command}`;
-    if (out) body = preview(out, 5, true);
-  } else if (call.name === "read") {
-    const from = Number(i.offset ?? 1);
-    const range = i.offset || i.limit ? `:${from}${i.limit ? `-${from + Number(i.limit) - 1}` : ""}` : "";
-    head = `read ${i.path}${range}`;
-    if (out) body = preview(out, 10);
-  } else if (call.name === "write") {
-    head = `write ${i.path}`;
-    body = result?.isError && out ? preview(out, 10) : preview(String(i.content ?? ""), 10);
-  } else if (call.name === "edit") {
-    head = `edit ${i.path}`;
-    const edits = (Array.isArray(i.edits) ? i.edits : []) as { oldText?: string; newText?: string }[];
-    const diff = edits.flatMap((e) => [
-      ...String(e.oldText ?? "")
-        .split("\n")
-        .map((l) => `- ${l}`),
-      ...String(e.newText ?? "")
-        .split("\n")
-        .map((l) => `+ ${l}`),
-    ]);
-    body = result?.isError && out ? preview(out, 10) : preview(diff.join("\n"), 10);
-  } else {
-    head = `${call.name} ${JSON.stringify(call.input)}`;
-    if (out) body = preview(out, 10);
-  }
-  // blank rows pad the block's background above and below, as pi does
-  return ["", head, ...(body.length ? ["", ...body] : []), ""].join("\n");
-}
+/** A tool block's background: running, done, failed. */
+export const toolBackground = ({ result }: ToolEntry) => (!result ? "#34383a" : result.isError ? "#5b282a" : "#254131");
 
 const pad = (n: number) => String(n).padStart(2, "0");
 /** Local time as fixed-width `YYYY-MM-DD HH:MM`, so titles line up. */

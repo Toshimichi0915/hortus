@@ -20,6 +20,17 @@ export interface ToolResult {
   output: string;
   image?: Image;
   isError?: boolean;
+  /** for the host's renderer, never sent to the model: the last value the call passed to `ToolContext.update` */
+  details?: unknown;
+}
+
+/** What a tool's `execute` gets besides its input. */
+export interface ToolContext {
+  /**
+   * Reports progress to the host as a `tool_update` event (e.g. for a progress bar); never sent to the model. The last
+   * value passed becomes the result's `details`, saved with it, so pass what the finished call's block should show last.
+   */
+  update(details: unknown): void;
 }
 
 /** Token counts of one completion; `input` includes `cacheRead` and `cacheWrite`. */
@@ -50,14 +61,14 @@ export interface Tool {
   name: string;
   description: string;
   inputSchema: z.ZodObject;
-  execute: (input: never) => Promise<unknown>;
+  execute: (input: never, ctx: ToolContext) => Promise<unknown>;
 }
 
 export const tool = <S extends z.ZodObject>(t: {
   name: string;
   description: string;
   inputSchema: S;
-  execute: (input: z.infer<S>) => Promise<unknown>;
+  execute: (input: z.infer<S>, ctx: ToolContext) => Promise<unknown>;
 }): Tool => t;
 
 /** Thinking effort; "off" disables thinking. Unset means the provider's default. */
@@ -115,6 +126,8 @@ export interface Events {
   /** streamed reasoning delta, when the provider exposes it */
   thinking: string;
   tool_call: ToolCall;
+  /** a running tool call's progress, from its `ToolContext.update`; not saved, except the last as the result's `details` */
+  tool_update: { id: string; details: unknown };
   /** a new message to append to the history */
   message: Message;
 }

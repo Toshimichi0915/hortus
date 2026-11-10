@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatTool, theme } from "./entry.ts";
 import { wrap } from "./markdown.ts";
-import { selectionText, toRows } from "./transcript.tsx";
+import { toolEntry } from "./entry.ts";
+import { builtinTools, genericTool } from "./tools.tsx";
+import { layout, selectionText, toRows, withBlockText } from "./transcript.tsx";
+
+const tools = (name: string) => builtinTools[name] ?? genericTool;
 
 test("wrap keeps every character and respects width, including wide chars", () => {
   for (const line of [
@@ -67,18 +70,31 @@ test("styled spans are split across wrapped rows", () => {
   );
 });
 
-test("edit blocks color removed lines red and added lines green", () => {
-  const call = { id: "1", name: "edit", input: { path: "a", edits: [{ oldText: "x", newText: "y" }] } };
-  const rows = toRows([{ id: 0, kind: "toolOk", text: formatTool(call) }], 20);
+test("a tool block takes the rows it measured, and copies as its renderer's text between its background rows", () => {
+  const bash = toolEntry({ id: "1", name: "bash", input: { command: "seq 2" } }, { id: "1", output: "1\n2\n" });
+  const entries = [{ id: 0, kind: "user" as const, text: "hi" }, bash, { id: 2, kind: "info" as const, text: "done" }];
+  // unmeasured: a guess of 3 rows; measured: as many as it drew (a blank row, header, blank, 2 lines, blank)
+  assert.equal(toRows(entries, 20).length, 1 + 1 + 3 + 1);
+  const { rows, segments } = layout(entries, 20, () => 6);
   assert.deepEqual(
-    rows.map((r) => [r.text, r.spans[0]?.color]),
+    segments.map(({ start, height, gap }) => [start, height, gap]),
     [
-      ["", undefined],
-      ["edit a", theme.text],
-      ["", undefined],
-      ["- x", theme.red],
-      ["+ y", theme.green],
-      ["", undefined],
+      [0, 1, false],
+      [1, 7, true],
+      [8, 1, false],
     ],
   );
+  assert.deepEqual(
+    rows.map((r) => r.block?.line ?? r.text),
+    ["hi", "", 0, 1, 2, 3, 4, 5, "done"],
+  );
+  // block rows have no text until copied; from "hi" into the block's output, then from the block's header on
+  const copy = (a: number, b: number, col = 99) =>
+    selectionText(
+      withBlockText(rows, { row: a, col: 0 }, { row: b, col }, 20, tools),
+      { row: a, col: 0 },
+      { row: b, col },
+    );
+  assert.equal(copy(0, 5), "hi\n\n\n$ seq 2\n\n1");
+  assert.equal(copy(3, 8, 1), "$ seq 2\n\n1\n2\n\ndo");
 });

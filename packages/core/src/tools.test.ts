@@ -3,10 +3,11 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { Tool } from "./llm.ts";
 import { applyEdits, bashTool, editTool, readTool, truncate } from "./tools.ts";
 
 const bom = String.fromCharCode(0xfeff);
-const run = (t: { execute: (input: never) => Promise<unknown> }, input: unknown) => t.execute(input as never);
+const run = (t: Tool, input: unknown) => t.execute(input as never, { update: () => {} });
 
 test("applyEdits matches exactly, rejects missing/duplicate/overlapping, falls back to fuzzy", () => {
   assert.equal(

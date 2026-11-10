@@ -17,7 +17,7 @@ const resolve = async ({ model = "m0", provider = "p0" }: { model?: string; prov
 /** The transcript's last entry as "kind: text". */
 const last = (cli: Cli) => {
   const e = cli.ui.getState().entries.at(-1);
-  return `${e?.kind}: ${e?.text}`;
+  return `${e?.kind}: ${e?.kind === "tool" ? e.call.name : e?.text}`;
 };
 
 /** Submits `value` and returns the transcript's last entry once it's done. */
@@ -96,7 +96,7 @@ test("/new and /clear show a new session next to the old one, with config defaul
     assert.notEqual(cli.session.path, prev.path);
     assert.equal(dirname(cli.session.path), dir);
     assert.deepEqual(
-      cli.ui.getState().entries.map((e) => e.text),
+      cli.ui.getState().entries.map((e) => (e.kind === "tool" ? e.call.name : e.text)),
       [`Session: ${cli.session.path} (0 messages)`],
     );
   }
@@ -125,7 +125,7 @@ test("/resume shows another session next to the shown one at its last entry, the
   assert.match(candidates[0]?.label ?? "", /^\d{4}-\d\d-\d\d \d\d:\d\d {2}old one$/);
   await send(cli, "/resume");
   assert.deepEqual(
-    cli.ui.getState().entries.map((e) => e.text),
+    cli.ui.getState().entries.map((e) => (e.kind === "tool" ? e.call.name : e.text)),
     [`Session: ${old.path} (1 messages) · model: m1`, "\nold\n  one\n"],
   );
   await send(cli, `/resume ${ids.get(shown.path)}`);

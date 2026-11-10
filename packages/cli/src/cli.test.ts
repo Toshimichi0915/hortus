@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type Agent, openSession, type Plugin } from "@hortus/core";
-import { createCli, runEffort, type UiState } from "./cli.ts";
+import { createCli, replay, runEffort, type UiState } from "./cli.ts";
 
 test("status follows the session's model and provider, and a stale resolve doesn't overwrite a newer one", async () => {
   const session = await openSession(null, await mkdtemp(join(tmpdir(), "hortus-")));
@@ -55,7 +55,8 @@ test("streamed deltas reach the store once a frame, and none are lost when the r
   assert.equal(cli.submit("hi"), true);
   await sleep(100);
   assert.deepEqual(lives, ["abc", ""]);
-  assert.equal(cli.ui.getState().entries.at(-1)?.text, "abcd");
+  const last = cli.ui.getState().entries.at(-1);
+  assert.equal(last?.kind === "assistant" && last.text, "abcd");
 });
 
 test("a run that fails keeps its completed messages in the session", async () => {
@@ -78,7 +79,8 @@ test("a run that fails keeps its completed messages in the session", async () =>
     ["user", "assistant", "tool"],
   );
   assert.deepEqual(cli.ui.getState().turn, []);
-  assert.equal(cli.ui.getState().entries.at(-1)?.text, "429");
+  const last = cli.ui.getState().entries.at(-1);
+  assert.equal(last?.kind === "error" && last.text, "429");
 });
 
 test("runs use the set effort only if the model takes it, or while its efforts are unknown", () => {
@@ -88,4 +90,49 @@ test("runs use the set effort only if the model takes it, or while its efforts a
   assert.equal(runEffort(state("max", ["off", "high"])), undefined);
   assert.equal(runEffort(state("high", ["off", "high"])), "high");
   assert.equal(runEffort(state(undefined, ["off", "high"])), undefined);
+});
+
+test("a tool block shows its call, then each update's details, then its result, and resumes as it ended", async () => {
+  const session = await openSession(null, await mkdtemp(join(tmpdir(), "hortus-")));
+  let observer: Plugin | undefined;
+  let step = async () => {};
+  const call = { id: "c1", name: "search", input: { q: "x" } };
+  const run = async () => {
+    await observer?.on?.message?.({ role: "assistant", text: "", toolCalls: [call] });
+    await observer?.on?.tool_call?.(call);
+    await step();
+    await observer?.on?.tool_update?.({ id: "c1", details: { progress: 0.5 } });
+    await step();
+    await observer?.on?.message?.({
+      role: "tool",
+      results: [{ id: "c1", output: "found", details: { sources: 3 } }],
+    });
+  };
+  const resolve = async () => ({ name: "p", model: "m", provider: {} });
+  const cli = await createCli(session, async (o) => {
+    observer = o;
+    return { plugins: [], resolve, run } as unknown as Agent;
+  });
+  const blocks = () => cli.ui.getState().entries.filter((e) => e.kind === "tool");
+  const seen: unknown[] = [];
+  step = async () => {
+    const [b] = blocks();
+    seen.push(b && { result: b.result, details: b.details });
+  };
+  cli.submit("go");
+  await sleep(20);
+  assert.deepEqual(seen, [
+    { result: undefined, details: undefined },
+    { result: undefined, details: { progress: 0.5 } },
+  ]);
+  const [done] = blocks();
+  assert.deepEqual(done && { call: done.call, result: done.result, details: done.details }, {
+    call,
+    result: { id: "c1", output: "found", details: { sources: 3 } },
+    details: { sources: 3 },
+  });
+  assert.equal(blocks().length, 1, "updated in place, not added");
+  // the result (details included) is in the session, so a resumed transcript draws the block as it ended
+  const [replayed] = replay(session.getState().messages).filter((e) => e.kind === "tool");
+  assert.deepEqual(replayed?.details, { sources: 3 });
 });

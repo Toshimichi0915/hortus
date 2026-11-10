@@ -8,6 +8,8 @@ import { codemodeTool, runScript, tsType } from "./codemode.ts";
 import { tool } from "./llm.ts";
 import { connectMcp, mcpResult } from "./mcp.ts";
 
+const ctx = { update: () => {} };
+
 const add = tool({
   name: "add",
   description: "Adds",
@@ -112,7 +114,7 @@ test("connectMcp lists and calls a stdio server's tools, and reports one that fa
     );
     const echo = mcp.tools[0];
     assert.ok(echo);
-    assert.equal(await echo.execute({ msg: "hi" } as never), "echo hi");
+    assert.equal(await echo.execute({ msg: "hi" } as never, ctx), "echo hi");
     assert.equal(mcp.errors.length, 1);
     assert.match(mcp.errors[0] ?? "", /^MCP server broken: [\s\S]*no luck/);
     // reachable from codemode under the same name
@@ -161,7 +163,7 @@ test("connectMcp advertises roots so file tools can write outside the temp dir",
   try {
     const write = mcp.tools.find((t) => t.name === "mcp__box__write");
     assert.ok(write);
-    assert.equal(await write.execute({ path: `${cwd}/shot.png` } as never), `wrote ${cwd}/shot.png`);
+    assert.equal(await write.execute({ path: `${cwd}/shot.png` } as never, ctx), `wrote ${cwd}/shot.png`);
   } finally {
     await mcp.close();
   }
@@ -176,7 +178,7 @@ test("connectMcp without roots still works for servers that don't need them", as
   try {
     const write = mcp.tools.find((t) => t.name === "mcp__box__write");
     assert.ok(write);
-    await assert.rejects(write.execute({ path: "/tmp/x" } as never), /no roots capability/);
+    await assert.rejects(write.execute({ path: "/tmp/x" } as never, ctx), /no roots capability/);
   } finally {
     await mcp.close();
   }

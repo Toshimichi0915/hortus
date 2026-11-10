@@ -80,7 +80,8 @@ export async function runScript(tools: Tool[], code: string, timeout: number): P
       async (args: unknown = {}) => {
         const input = t.inputSchema.safeParse(args);
         if (!input.success) throw new Error(`Invalid input for ${t.name}: ${input.error.message}`);
-        return t.execute(input.data as never);
+        // ponytail: a tool's progress inside a script isn't shown; forward it as the codemode call's if that's wanted
+        return t.execute(input.data as never, { update: () => {} });
       },
     ]),
   );
