@@ -293,6 +293,17 @@ export async function createCli(session: Session, makeAgent: (observer: Plugin) 
       return true;
     },
     abort: () => aborter?.abort(),
+    /**
+     * aborts the running turn, saves the messages it completed and stops MCP servers; tools don't take the abort
+     * signal, so it doesn't wait for the turn to end, and the caller should exit the process
+     */
+    close: async () => {
+      aborter?.abort();
+      const { turn, session } = ui.getState();
+      // emptied first, so the turn's own save (if it gets there) doesn't add them twice
+      ui.setState({ turn: [] });
+      await Promise.all([session.append(turn), agent.close()]);
+    },
     /** sets the effort of the next runs (undefined = provider default) and saves it to config.json */
     setEffort,
     /** next effort the model takes after the set one: default, then EFFORTS in order, then default again */
