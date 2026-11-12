@@ -2,10 +2,9 @@ import { stripVTControlCharacters } from "node:util";
 import type { BashUpdate, ToolCall, ToolResult } from "@hortus/core";
 import { Box, Text } from "ink";
 import type { ComponentType, FunctionComponent } from "react";
-import stringWidth from "string-width";
 import type { TextEntry, ToolSibling } from "./entry.ts";
 import { theme } from "./themes.ts";
-import { cutCols, type Span, wrap } from "./markdown.ts";
+import { type Span, wrapSpans } from "./markdown.ts";
 
 /** What a tool call's block shows. */
 export interface ToolView {
@@ -80,15 +79,7 @@ export interface ToolBlock {
 
 /** Splits styled lines into screen rows of at most `width` columns, wrapping the way the transcript wraps text. */
 export function wrapLines(lines: Span[][], width: number): Span[][] {
-  return lines.flatMap((spans) => {
-    let col = 0;
-    return wrap(spans.map((s) => s.text).join(""), Math.max(1, width)).map((text) => {
-      const w = stringWidth(text);
-      const row = cutCols(spans, col, col + w);
-      col += w;
-      return row;
-    });
-  });
+  return lines.flatMap((spans) => wrapSpans(spans, Math.max(1, width)));
 }
 
 /**

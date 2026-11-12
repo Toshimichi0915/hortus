@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { theme } from "./entry.ts";
-import { markdown } from "./markdown.ts";
+import stringWidth from "string-width";
+import { cutCols, markdown, wrap, wrapSpans } from "./markdown.ts";
 
 test("markdown strips markers into styled spans and keeps fenced code verbatim", () => {
   const md = "# Title\n- a **b _c_** `d` [e](http://x)\n```\n**raw**\n```\n> q\n---";
@@ -62,4 +63,18 @@ test("markdown shrinks a table wider than the pane and wraps its cells", () => {
     rows.map((r) => r.map((s) => s.text).join("")),
     ["a │ long  ", "  │ text  ", "  │ here  ", "──┼───────", "b │ x     "],
   );
+});
+
+test("wrapSpans splits styled spans into the rows wrap makes, as cutCols by columns would", () => {
+  const spans = [{ text: "aaa " }, { text: "日本語", bold: true }, { text: "" }, { text: " bbb ccc", italic: true }];
+  for (const width of [1, 3, 5, 7, 40]) {
+    let col = 0;
+    const expected = wrap(spans.map((s) => s.text).join(""), width).map((t) => {
+      const from = col;
+      col += stringWidth(t);
+      return cutCols(spans, from, col);
+    });
+    assert.deepEqual(wrapSpans(spans, width), expected, `width ${width}`);
+  }
+  assert.deepEqual(wrapSpans([], 10), [[]]);
 });

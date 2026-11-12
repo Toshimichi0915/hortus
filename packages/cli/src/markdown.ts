@@ -61,6 +61,27 @@ export function wrap(line: string, width: number): string[] {
   return rows;
 }
 
+/** A styled line `wrap`ped into rows; one pass, as `wrap`'s rows concatenate back to the line. */
+export function wrapSpans(spans: Span[], width: number): Span[][] {
+  let i = 0;
+  let at = 0; // offset into spans[i].text
+  return wrap(spans.map((s) => s.text).join(""), width).map((text) => {
+    const row: Span[] = [];
+    for (let need = text.length; need > 0; ) {
+      const s = spans[i] as Span;
+      const take = Math.min(need, s.text.length - at);
+      if (take > 0) row.push({ ...s, text: s.text.slice(at, at + take) });
+      at += take;
+      need -= take;
+      if (at >= s.text.length) {
+        i++;
+        at = 0;
+      }
+    }
+    return row;
+  });
+}
+
 /** Text between columns [from, to) of a row. */
 export function sliceCols(text: string, from: number, to: number) {
   let col = 0;
@@ -116,14 +137,7 @@ function table(rows: string[], width: number): Span[][] {
   }
   // one grid row → as many lines as its tallest wrapped cell
   const lines = (r: Span[][]) => {
-    const parts = r.map((cell, c) => {
-      let col = 0;
-      return wrap(cell.map((s) => s.text).join(""), widths[c] ?? 1).map((t) => {
-        const from = col;
-        col += stringWidth(t);
-        return cutCols(cell, from, col);
-      });
-    });
+    const parts = r.map((cell, c) => wrapSpans(cell, widths[c] ?? 1));
     return Array.from({ length: Math.max(...parts.map((p) => p.length)) }, (_, k) =>
       line(parts.map((p) => p[k] ?? [])),
     );

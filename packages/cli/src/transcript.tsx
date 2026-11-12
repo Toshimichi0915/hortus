@@ -3,7 +3,7 @@ import { Box, type DOMElement, Text, useBoxMetrics, useInput, useStdin } from "i
 import { Fragment, memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import stringWidth from "string-width";
 import { type Entry, styleOf, type TextEntry, type ToolEntry, toolBackground } from "./entry.ts";
-import { cutCols, markdown, type Span, sliceCols, wrap } from "./markdown.ts";
+import { cutCols, markdown, type Span, sliceCols, wrapSpans } from "./markdown.ts";
 import { theme, themeVersion } from "./themes.ts";
 import type { EntryBlock, ToolBlock, ToolView } from "./tools.tsx";
 
@@ -49,13 +49,10 @@ function entryRows(e: TextEntry, width: number): Row[] {
   const src: [number, number][] = [];
   const lines = e.kind === "assistant" ? markdown(e.text, width, src) : split.map((text) => [{ text }]);
   lines.forEach((spans, l) => {
-    let col = 0;
     const s = src[l];
     const md = s && { lines: split, from: s[0], to: s[1] };
-    wrap(spans.map((s) => s.text).join(""), Math.max(1, width)).forEach((text, i) => {
-      const w = stringWidth(text);
-      rows.push({ kind: e.kind, text, spans: cutCols(spans, col, col + w), cont: i > 0, md });
-      col += w;
+    wrapSpans(spans, Math.max(1, width)).forEach((row, i) => {
+      rows.push({ kind: e.kind, text: row.map((s) => s.text).join(""), spans: row, cont: i > 0, md });
     });
   });
   // a model's leading and trailing blank lines (thinking blocks end with "\n\n") would add to the gap between entries;
