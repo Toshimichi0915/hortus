@@ -185,6 +185,31 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  examples/plugins:
+    dependencies:
+      '@hortus/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@hortus/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.32.2
+        version: 1.32.2(supports-color@7.2.0)(zod@4.6.7)
+      ink:
+        specifier: ^8.0.0
+        version: 8.0.0(@types/react@19.3.0)(react@19.3.1)
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+
   packages/cli:
     dependencies:
       '@hortus/core':
@@ -206,6 +231,9 @@ importers:
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
 
   packages/core:
     dependencies:

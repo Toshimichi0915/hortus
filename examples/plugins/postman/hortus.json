@@ -1,0 +1,5 @@
+{
+  "name": "postman",
+  "version": "0.8.0",
+  "entrypoint": "dist/index.js"
+}
