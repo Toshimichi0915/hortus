@@ -10,7 +10,8 @@
     "./testing": {
       "types": "./dist/testing.d.ts",
       "default": "./dist/testing.js"
-    }
+    },
+    "./bin": "./dist/index.js"
   },
   "engines": {
     "node": ">=22.15"
