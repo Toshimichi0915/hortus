@@ -33,6 +33,16 @@ test("built-in blocks show a pi-style header and a tail/head preview", () => {
   assert.equal(text({ call: other, result: { id: "4", output: "out" }, width: 40 }), 'mcp__s__t {"q":1}\n\nout');
 });
 
+test("a call still streaming its input shows what has arrived, never undefined", () => {
+  const call = (name: string) => ({ id: "1", name, input: undefined as unknown as Record<string, unknown> });
+  assert.equal(text({ call: call("bash"), width: 40 }), "$ ");
+  assert.equal(text({ call: call("bash"), partial: '{"command": "echo \\"hi', width: 40 }), '$ echo "hi');
+  assert.equal(text({ call: call("read"), partial: '{"path":"a.ts","off', width: 40 }), "read a.ts");
+  assert.equal(text({ call: call("mcp__s__t"), partial: '{"q":', width: 40 }), 'mcp__s__t {"q":');
+  // a model's call without the field
+  assert.equal(text({ call: { id: "1", name: "bash", input: {} }, width: 40 }), "$ ");
+});
+
 // Ink drops a drawn line's trailing spaces (and so does copying, see `blockLines`)
 const trimmed = (s: string) => s.replace(/ +$/gm, "");
 

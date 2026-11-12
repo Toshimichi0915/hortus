@@ -148,38 +148,59 @@ const block = (head: string, body: Span[][]): Span[][] => [
   ...(body.length ? [[], ...body] : []),
 ];
 
-const input = (call: ToolCall) => (call.input ?? {}) as Record<string, unknown>;
+/**
+ * The call's input; while it still streams (`input` unset), the string fields `partial` has so far, the last one
+ * possibly cut short.
+ */
+const input = ({ call, partial }: ToolView): Record<string, unknown> => {
+  if (call.input) return call.input as Record<string, unknown>;
+  const fields: Record<string, unknown> = {};
+  // ponytail: top-level string fields only (by regex, nested keys too); a partial JSON parser if numbers matter
+  for (const [, key, value] of (partial ?? "").matchAll(/"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)/g)) {
+    try {
+      fields[key as string] = JSON.parse(`"${value}"`);
+    } catch {} // a \u escape cut short
+  }
+  return fields;
+};
 
 /** Any tool without a renderer of its own: its name and JSON input, then the start of its output. */
-export const genericTool = linesRenderer(({ call, result }) => {
+export const genericTool = linesRenderer(({ call, result, partial }) => {
   const out = output(result);
-  return block(`${call.name} ${JSON.stringify(call.input)}`, out ? muted(preview(out, 10)) : []);
+  return block(
+    `${call.name} ${call.input ? JSON.stringify(call.input) : (partial ?? "")}`,
+    out ? muted(preview(out, 10)) : [],
+  );
 });
 
 /** The built-in tools' renderers, by tool name. */
 export const builtinTools: Record<string, ToolBlock> = {
-  bash: linesRenderer(({ call, result, details }) => {
+  bash: linesRenderer((view) => {
+    const { result, details } = view;
     // while running, builtin:bash's live output (`BashUpdate`)
     const live = !result && (details as BashUpdate | undefined)?.output;
     const out = live || output(result);
-    return block(`$ ${input(call).command}`, out ? muted(preview(screenText(out), 5, true)) : []);
+    return block(`$ ${input(view).command ?? ""}`, out ? muted(preview(screenText(out), 5, true)) : []);
   }),
-  read: linesRenderer(({ call, result }) => {
-    const i = input(call);
+  read: linesRenderer((view) => {
+    const { result } = view;
+    const i = input(view);
     const from = Number(i.offset ?? 1);
     const range = i.offset || i.limit ? `:${from}${i.limit ? `-${from + Number(i.limit) - 1}` : ""}` : "";
     const out = output(result);
-    return block(`read ${i.path}${range}`, out ? muted(preview(out, 10)) : []);
+    return block(`read ${i.path ?? ""}${range}`, out ? muted(preview(out, 10)) : []);
   }),
-  write: linesRenderer(({ call, result }) => {
-    const i = input(call);
+  write: linesRenderer((view) => {
+    const { result } = view;
+    const i = input(view);
     const out = output(result);
-    return block(`write ${i.path}`, muted(preview(result?.isError && out ? out : String(i.content ?? ""), 10)));
+    return block(`write ${i.path ?? ""}`, muted(preview(result?.isError && out ? out : String(i.content ?? ""), 10)));
   }),
-  edit: linesRenderer(({ call, result }) => {
-    const i = input(call);
+  edit: linesRenderer((view) => {
+    const { result } = view;
+    const i = input(view);
     const out = output(result);
-    if (result?.isError && out) return block(`edit ${i.path}`, muted(preview(out, 10)));
+    if (result?.isError && out) return block(`edit ${i.path ?? ""}`, muted(preview(out, 10)));
     const edits = (Array.isArray(i.edits) ? i.edits : []) as { oldText?: string; newText?: string }[];
     const diff = edits.flatMap((e) => [
       ...String(e.oldText ?? "")
@@ -190,7 +211,7 @@ export const builtinTools: Record<string, ToolBlock> = {
         .map((l) => `+ ${l}`),
     ]);
     return block(
-      `edit ${i.path}`,
+      `edit ${i.path ?? ""}`,
       preview(diff.join("\n"), 10).map((text): Span[] => [
         {
           text,

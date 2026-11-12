@@ -93,7 +93,7 @@ test("composeTools wraps a tool's built-in renderer in load order, and copies a 
   assert.equal(draw(tools, view("bash")), "b\na\n$ ls");
   assert.equal(tools("bash").text(view("bash")), "b\na\n$ ls");
   // other tools keep their own renderer; one without any gets the generic one
-  assert.equal(tools("read").text(view("read")), "read undefined");
+  assert.equal(tools("read").text(view("read")), "read ");
   assert.equal(draw(tools, view("mcp__x__y")), 'mcp__x__y {"command":"ls"}');
   // a renderer's own text is used as is
   const own = linesRenderer(() => [[{ text: "drawn" }]]);
