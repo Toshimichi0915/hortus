@@ -1,5 +1,4 @@
 export * from "./agent.ts";
-export * from "./builtin.ts";
 export * from "./codemode.ts";
 export * from "./config.ts";
 export * from "./context.ts";
@@ -10,3 +9,4 @@ export * from "./providers/anthropic.ts";
 export * from "./providers/openai.ts";
 export * from "./secrets.ts";
 export * from "./session.ts";
+export * from "./tools.ts";

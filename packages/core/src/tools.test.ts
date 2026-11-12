@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Tool } from "./llm.ts";
-import { applyEdits, bashTool, editTool, readTool, truncate } from "./tools.ts";
+import { tempDir, toolCtx } from "./testing.ts";
+import { applyEdits, type BashUpdate, bashTool, editTool, readTool, truncate } from "./tools.ts";
 
 const bom = String.fromCharCode(0xfeff);
-const run = (t: Tool, input: unknown) => t.execute(input as never, { update: () => {} });
+const run = (t: Tool, input: unknown) => t.execute(input as never, toolCtx());
 
 test("applyEdits matches exactly, rejects missing/duplicate/overlapping, falls back to fuzzy", () => {
   assert.equal(
@@ -65,8 +66,8 @@ test("truncate keeps head or tail within the line limit", () => {
   assert.equal(truncate("a\nb\n").truncated, false);
 });
 
-test("read pages with offset/limit; edit keeps CRLF and BOM; bash reports exit codes", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "hortus-"));
+test("read pages with offset/limit; edit keeps CRLF and BOM; bash reports exit codes", async (t) => {
+  const dir = await tempDir(t, "hortus-");
   const f = join(dir, "f.txt");
   await writeFile(f, "1\n2\n3\n4");
   assert.equal(
@@ -82,4 +83,36 @@ test("read pages with offset/limit; edit keeps CRLF and BOM; bash reports exit c
   assert.equal(await run(bashTool, { command: "echo hi; echo err >&2" }), "hi\nerr\n");
   await assert.rejects(run(bashTool, { command: "echo out; exit 3" }), /out\n\nCommand exited with code 3/);
   await assert.rejects(run(bashTool, { command: "sleep 5", timeout: 0.2 }), /timed out after 0.2 seconds/);
+  // how it failed is the last update, so the error result's details
+  const updates: unknown[] = [];
+  const failing = toolCtx({ update: (d) => void updates.push(d) });
+  await assert.rejects(bashTool.execute({ command: "exit 3" } as never, failing));
+  await assert.rejects(bashTool.execute({ command: "sleep 5", timeout: 0.2 } as never, failing));
+  assert.deepEqual(updates, [{ exitCode: 3 }, { exitCode: null, signal: "SIGKILL", timedOut: true }]);
+  // an already-aborted run doesn't start the command
+  const marker = join(dir, "ran");
+  const ctx = toolCtx({ signal: AbortSignal.abort() });
+  await assert.rejects(bashTool.execute({ command: `touch ${marker}` } as never, ctx), { message: "Command aborted" });
+  assert.equal(existsSync(marker), false);
+});
+
+test("bash runs with ctx.env, and streams its output through ctx.update, ending with no details", async () => {
+  const updates: unknown[] = [];
+  const ctx = toolCtx({ env: { HORTUS_TEST: "from env" }, update: (d) => void updates.push(d) });
+  const out = await bashTool.execute({ command: 'echo "$HORTUS_TEST"; sleep 0.4; echo b' } as never, ctx);
+  assert.equal(out, "from env\nb\n");
+  // timing-dependent: at least the first chunk is streamed, and the last update clears it
+  assert.deepEqual(updates[0], { output: "from env\n" });
+  assert.equal(updates.length > 1 && updates.at(-1), undefined);
+  // a quick command streams nothing
+  updates.length = 0;
+  await bashTool.execute({ command: "echo hi" } as never, ctx);
+  assert.deepEqual(updates, []);
+  // more than 8 KB: the cut tail starts after a line break, or (one long line) at a character, not mid-"é"
+  updates.length = 0;
+  await bashTool.execute({ command: "printf 'xé%.0s' {1..5000}; echo; seq 3; sleep 0.3" } as never, ctx);
+  assert.equal((updates[0] as BashUpdate).output.split("\n")[0], "1");
+  updates.length = 0;
+  await bashTool.execute({ command: "printf 'éx%.0s' {1..5000}; sleep 0.3" } as never, ctx);
+  assert.match((updates[0] as BashUpdate).output, /^x(éx)+$/);
 });
