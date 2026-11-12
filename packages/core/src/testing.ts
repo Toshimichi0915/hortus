@@ -79,11 +79,10 @@ export interface HomeFiles {
 }
 
 /**
- * Points `HOME` at a fresh temp dir and writes `~/.hortus` from `files`. Returns a cleanup that restores `HOME` and
- * deletes the dir. `HOME` is process-wide, so tests using it must not run concurrently within one file.
+ * Points `HOME` at a fresh temp dir and writes `~/.hortus` from `files`. Returns a cleanup that
+ * deletes the dir, leaving `HOME` on it. `HOME` is process-wide, so tests using it must not run concurrently within one file.
  */
 export async function tempHome(files: HomeFiles = {}): Promise<() => Promise<void>> {
-  const prev = process.env.HOME;
   const home = await mkdtemp(join(tmpdir(), "hortus-home-"));
   const dir = join(home, ".hortus");
   const write = async (path: string, content: string) => {
@@ -105,8 +104,9 @@ export async function tempHome(files: HomeFiles = {}): Promise<() => Promise<voi
     }
   }
   process.env.HOME = home;
+  // HOME stays on the (removed) temp dir: `t.after` hooks run in registration order, so an `agent.close()` /
+  // `cli.close()` registered after this one still flushes its saves, which must never land in the real ~/.hortus
   return async () => {
-    process.env.HOME = prev;
     await rm(home, { recursive: true, force: true });
   };
 }
