@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { version } from "@hortus/cli";
 import { createCli } from "@hortus/cli/testing";
 import { type AskEvent, type CompletionRequest, createAgent, loadSecrets, openSession } from "@hortus/core";
-import { scripted, tempHome } from "@hortus/core/testing";
+import { scripted, tempHome, until } from "@hortus/core/testing";
 
 const dir = fileURLToPath(new URL("..", import.meta.url));
 const scriptedSecret = { type: "scripted", apiKey: "scripted" };
@@ -244,7 +244,7 @@ test("/web in the TUI asks which hit to put into the prompt; elsewhere it lists 
     createAgent({ ...o, fetch, provided: { "@hortus/cli": version }, extra: [pick, ...(o.extra ?? [])] }),
   );
   assert.equal(cli.submit("/web q"), true);
-  for (let i = 0; i < 100 && cli.ui.getState().input === ""; i++) await new Promise((r) => setTimeout(r, 10));
+  await until(() => cli.ui.getState().input !== "");
   assert.deepEqual(asked, [["https://a.test/ A", "https://b.test/ B"]]);
   assert.equal(cli.ui.getState().input, "https://b.test/");
 });

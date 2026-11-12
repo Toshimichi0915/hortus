@@ -208,8 +208,8 @@ test("cli.scroll('top') when everything fits doesn't pin: later lines still foll
   const { cli, wait } = await tui(t);
   cli.push({ kind: "info", text: "first" });
   await wait((s) => /first/.test(s));
+  // applied at once: a state update outside React's batching renders synchronously
   cli.scroll("top");
-  await sleep(50);
   for (let i = 0; i < 40; i++) cli.push({ kind: "info", text: `line ${i}` });
   await wait((s) => /line 39/.test(s));
 });
@@ -291,7 +291,7 @@ test("thinking entries carry when they started and ended, and live while streami
     turns: [
       async (_req, _ctx, cb) => {
         cb?.thinking?.("pondering");
-        await sleep(150);
+        await sleep(150); // real time: the thinking block's measured duration is checked below
         return { text: "answer" };
       },
     ],

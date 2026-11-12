@@ -11,7 +11,7 @@ import type { Ctx, Events, Message, Plugin, ProviderDef, Tool, ToolResult } from
 import { tool } from "./llm.ts";
 import type { LoadOptions, Named } from "./plugins.ts";
 import { memorySession, openSession, type PluginEntry } from "./session.ts";
-import { record, scripted, type Turn, tempDir, tempHome, untimed } from "./testing.ts";
+import { record, scripted, type Turn, tempDir, tempHome, untimed, until } from "./testing.ts";
 import { withToolLock } from "./tools.ts";
 
 declare module "./llm.ts" {
@@ -399,8 +399,10 @@ test("CompleteRequest.signal aborts that call, like the run's signal", async (t)
       ),
   ]);
   const c = new AbortController();
-  setTimeout(() => c.abort(new Error("too slow")), 20);
-  await assert.rejects(agent.ctx.complete({ messages: history, signal: c.signal }), /too slow/);
+  const done = agent.ctx.complete({ messages: history, signal: c.signal });
+  await until(() => provider.requests.length === 1);
+  c.abort(new Error("too slow"));
+  await assert.rejects(done, /too slow/);
   assert.equal(provider.requests.length, 1);
 });
 
@@ -589,6 +591,7 @@ test("withToolLock: a plugin tool and builtin:edit on one file in one batch don'
     execute: ({ path }) =>
       withToolLock(path, async () => {
         const text = await readFile(path, "utf8");
+        // a negative window: an unlocked edit (started alongside) would land in it; nothing to await instead
         await sleep(30);
         await writeFile(path, `${text}\nmore`);
         return "ok";
@@ -648,7 +651,7 @@ test("withToolLock is re-entrant: a wrapper of edit holding it, and a holder cal
     ],
   );
   await writeFile(file, "a");
-  const end = await Promise.race([agent.run(user), sleep(2000).then(() => assert.fail("deadlocked"))]);
+  const end = await agent.run(user);
   assert.equal(await readFile(file, "utf8"), "d");
   assert.ok(!end?.messages.some((m) => m.role === "tool" && m.results.some((r) => r.isError)));
 });
@@ -656,16 +659,22 @@ test("withToolLock is re-entrant: a wrapper of edit holding it, and a holder cal
 test("withToolLock: once released, a call from its holder's async context waits its turn", async () => {
   const order: string[] = [];
   let later: Promise<void> | undefined;
+  let lateQueued = false;
+  let release = () => {};
+  const go = new Promise<void>((r) => (release = r));
   await withToolLock("f", async () => {
     // started inside the holder, runs after it has released: it must queue behind the next caller
-    later = sleep(10).then(() =>
-      withToolLock("f", async () => {
+    later = go.then(() => {
+      const p = withToolLock("f", async () => {
         order.push("late");
-      }),
-    );
+      });
+      lateQueued = true;
+      return p;
+    });
   });
   const next = withToolLock("f", async () => {
-    await sleep(30);
+    release();
+    await until(() => lateQueued);
     order.push("next");
   });
   await Promise.all([later, next]);
@@ -779,13 +788,17 @@ test("ctx.runTool from a tool is gated as <parent>/<n> with parentId, and can be
 
 test("batch gating: every tool_call handler finishes before any tool starts; a sequential tool runs alone, last", async (t) => {
   const log: string[] = [];
+  // the parallel calls a and b each wait until both have started (a hang if they ran one by one)
+  let bothStarted = () => {};
+  const both = new Promise<void>((r) => (bothStarted = r));
   const slow = tool({
     name: "slow",
     description: "",
     inputSchema: z.object({ id: z.string() }),
     execute: async ({ id }) => {
       log.push(`start ${id}`);
-      await sleep(20);
+      if (log.includes("start a") && log.includes("start b")) bothStarted();
+      await both;
       log.push(`end ${id}`);
       return id;
     },
@@ -795,7 +808,7 @@ test("batch gating: every tool_call handler finishes before any tool starts; a s
     tools: [slow, seq],
     on: {
       tool_call: async ({ call }) => {
-        await sleep(5);
+        await new Promise(setImmediate);
         log.push(`gate ${call.id}`);
       },
     },
@@ -1055,10 +1068,12 @@ test("ctx.runTool's signal aborts that call alone (and its own nested calls, ask
     description: "",
     inputSchema: z.object({}),
     execute: async (_, ctx) => {
-      // not AbortSignal.timeout: its timer doesn't keep the event loop alive while everything else waits on it
       const c = new AbortController();
-      setTimeout(() => c.abort(), 50);
-      const r = await ctx.runTool({ id: "", name: "slow", input: {} }, { signal: c.signal });
+      const running = ctx.runTool({ id: "", name: "slow", input: {} }, { signal: c.signal });
+      // once slow's completion is in flight (its ask was made just before)
+      await until(() => provider.requests.length === 2);
+      c.abort();
+      const r = await running;
       return `${r.output}; run aborted: ${ctx.signal.aborted}`;
     },
   });

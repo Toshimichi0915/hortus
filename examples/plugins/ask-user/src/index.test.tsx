@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { createAgent, openSession } from "@hortus/core";
 import { scripted, tempHome, until } from "@hortus/core/testing";
@@ -28,12 +27,13 @@ test("ask_user: the TUI's prompt slot shows the question, and the picked option 
       extra: [{ name: "scripted", plugin: { providers: { scripted: provider } } }, ...(o.extra ?? [])],
     }),
   );
-  const ui = renderApp(cli);
+  const ui = renderApp(cli, { colors: true });
   t.after(() => ui.app.unmount());
   cli.submit("pick a color");
   await until(() => /Which color\?[\s\S]*red[\s\S]*blue/.test(ui.screen()), 5000);
   ui.keys("\x1b[B");
-  await sleep(20); // separate key chunks, not a wait for state
+  // blue drawn in the accent: selected, so the Enter that follows picks it
+  await until(() => ui.screen().includes("mblue\u001b[39m"));
   ui.keys("\r");
   await until(() => provider.requests.length > 1 && !cli.ui.getState().busy, 5000);
   assert.equal(sent(provider, 1), "The user answered: blue");

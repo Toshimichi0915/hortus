@@ -9,7 +9,7 @@ import type { Ctx, Plugin, RunInfo, Tool, ToolCtx } from "./llm.ts";
 import { fitEffort, tool, toolResult } from "./llm.ts";
 import type { LoadOptions, Named } from "./plugins.ts";
 import { childDir, newSession, openSession, sessionLineage, sessionsDir } from "./session.ts";
-import { scripted, type Turn, tempHome, untimed } from "./testing.ts";
+import { scripted, type Turn, tempHome, untimed, until } from "./testing.ts";
 import { bashTool, editTool, readTool, writeTool } from "./tools.ts";
 
 const call = (id: string, name: string, input: unknown = {}) => ({ id, name, input });
@@ -383,7 +383,7 @@ test("ctx.pending() lists the sends waiting on the session, with their source", 
   let release!: () => void;
   const held = new Promise<void>((r) => (release = r));
   let seen: ReturnType<Ctx["pending"]> = [];
-  const { agent } = await setup(t, [
+  const { agent, provider } = await setup(t, [
     async () => {
       await held;
       return { text: "a" };
@@ -394,7 +394,7 @@ test("ctx.pending() lists the sends waiting on the session, with their source", 
   const session = newSession();
   await agent.setSession(session);
   const run = agent.run("go");
-  await new Promise((r) => setTimeout(r, 20));
+  await until(() => provider.requests.length === 1);
   void agent.ctxOf("other").send("joining", { deliver: "context" });
   void agent.ctx.send("later", { deliver: "after", source: "user" });
   seen = agent.ctx.pending();
@@ -477,6 +477,7 @@ test("core stamps durationMs on a run tool's result (saved), not on a handler's;
     description: "",
     inputSchema: z.object({}),
     execute: async () => {
+      // real time: the duration under test
       await new Promise((r) => setTimeout(r, 30));
       return "done";
     },

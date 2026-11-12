@@ -179,7 +179,7 @@ test("sendDelayMs holds a prompt: Esc takes it back, Enter sends it after the de
   await wait(() => /sending in 1s · esc to edit · enter to send now {2}hello/.test(screen()));
   keys("\x1b");
   await wait(() => cli.ui.getState().input === "hello" && !/sending in/.test(screen()));
-  await new Promise((r) => setTimeout(r, 400));
+  await new Promise((r) => setTimeout(r, 400)); // real time: past the 300 ms send delay, a (wrong) held send would be sent
   assert.equal(provider.requests.length, 0);
   keys("\r");
   await wait(() => provider.requests.length === 1, 3000);
@@ -232,7 +232,7 @@ test("while a turn runs, Esc takes a held steer back without aborting the run", 
   await wait(() => cli.ui.getState().input === "");
   keys("\x1b");
   await wait(() => cli.ui.getState().input === "wait");
-  await new Promise((r) => setTimeout(r, 50));
+  await new Promise((r) => setTimeout(r, 50)); // negative check: a (wrong) abort would end the run by now
   assert.equal(cli.ui.getState().busy, true, "not aborted");
   first.release();
   await wait(() => !cli.ui.getState().busy);

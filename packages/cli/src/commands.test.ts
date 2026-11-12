@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { setTimeout as sleep } from "node:timers/promises";
 import {
   type Agent,
   type AgentCommand,
@@ -50,9 +49,9 @@ const resolve = async ({ model = "m0", provider = "p0" }: { model?: string; prov
 
 /**
  * A stand-in agent with the CLI's commands as plugins (plus `fields`): like core, it keeps the current session, and a
- * run with input appends it there and announces it to the CLI's observer, then waits `delay` ms.
+ * run with input appends it there and announces it to the CLI's observer, then waits for `hold`.
  */
-function fakeAgent(o: LoadOptions, fields: { plugins?: Named[]; ctx?: unknown } = {}, delay = 0) {
+function fakeAgent(o: LoadOptions, fields: { plugins?: Named[]; ctx?: unknown } = {}, hold?: Promise<void>) {
   let current: Session | undefined;
   const observer = o.extra?.[0]?.plugin;
   // like the host ctx: the TUI as its host, on the current session
@@ -79,7 +78,7 @@ function fakeAgent(o: LoadOptions, fields: { plugins?: Named[]; ctx?: unknown } 
       if (input === undefined || !current) return undefined;
       const [m] = await current.append([{ role: "user", content: input }]);
       if (m) await observer?.on?.message?.(m, { session: current } as Ctx);
-      await sleep(delay);
+      await hold;
       return { source: "run", messages: [] };
     },
     // no plugin lists skills
@@ -97,10 +96,11 @@ const last = (cli: Cli) => {
   return `${e?.kind}: ${e?.kind === "tool" ? e.call.name : e?.text}`;
 };
 
-/** Submits `value` and returns the transcript's last entry once it's done. */
+/** Submits `value` and returns the transcript's last entry once it's done: a line added, or the session switched. */
 async function send(cli: Cli, value: string) {
+  const [session, before] = [cli.session, cli.ui.getState().entries.at(-1)];
   assert.equal(cli.submit(value), true);
-  await sleep(20);
+  await until(() => cli.session !== session || cli.ui.getState().entries.at(-1) !== before);
   return last(cli);
 }
 
@@ -117,7 +117,7 @@ test("parseCommand splits one line into a name and, once a space follows it, an 
 test("/model sets the session's provider and model, which status follows; a rejected one changes nothing", async (t) => {
   const session = await openSession(null, await tempDir(t, "hortus-"));
   const cli = await createCli(session, async (o) => fakeAgent(o));
-  await sleep(10);
+  await until(() => cli.ui.getState().status?.model === "m0");
   assert.equal(await send(cli, "/model"), "info: Model: p0/m0");
   assert.equal(
     await send(cli, "/model ollama-cloud/deepseek-v4.1-flash:1017"),
@@ -180,6 +180,7 @@ test("/new and /clear show a new session next to the old one, with config defaul
       [`Session: ${cli.session.path} (0 messages)`],
     );
   }
+  await until(() => cli.ui.getState().status?.model === "m0");
   assert.equal(cli.ui.getState().status?.model, "m0");
   await send(cli, "hi");
   assert.deepEqual(texts(cli.session), ["hi"]);
@@ -220,7 +221,7 @@ test("plugin commands run with their argument and replace built-ins by name; unk
       name: "echo",
       description: "",
       run: async (arg) => {
-        await sleep(10);
+        await new Promise(setImmediate);
         return `echo ${arg}`;
       },
     },
@@ -252,14 +253,20 @@ test("a command can start a turn, and the session isn't swapped while one runs",
   const commands: Command[] = [
     { name: "review", description: "", run: (_, ctx) => void cliOf(ctx).submit("review this") },
   ];
+  // the turn runs until the test lets it end
+  let release = () => {};
+  const hold = new Promise<void>((r) => {
+    release = r;
+  });
   const cli = await createCli(session, async (o) =>
-    fakeAgent(o, { plugins: [{ name: "p", plugin: { commands } }] }, 40),
+    fakeAgent(o, { plugins: [{ name: "p", plugin: { commands } }] }, hold),
   );
   assert.equal(cli.submit("/review"), true);
-  await sleep(10);
+  await until(() => cli.ui.getState().busy);
   assert.equal(cli.ui.getState().busy, true);
   await assert.rejects(cli.setSession(session), /while a turn is running/);
-  await sleep(50);
+  release();
+  await until(() => !cli.ui.getState().busy);
   assert.deepEqual(texts(session), ["review this"]);
 });
 

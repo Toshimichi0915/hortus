@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
-import { setTimeout as sleep } from "node:timers/promises";
 import { type AskEvent, type Ctx, createAgent, type Named, openSession, type Plugin, tool } from "@hortus/core";
 import { record, scripted, type Turn, tempDir, tempHome, until } from "@hortus/core/testing";
 import { Box, render, Text, useInput } from "ink";
@@ -16,7 +16,21 @@ import { terminal } from "./testing.ts";
 import { dark } from "./themes.ts";
 import { type EntryRenderer, linesRenderer, type ToolRenderer } from "./tools.tsx";
 
-const settle = (ms = 120) => sleep(ms);
+/** a promise the test resolves itself (`Promise.withResolvers` is past this lib's target) */
+function gate() {
+  let resolve = () => {};
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+/** writes `k` to the fake terminal and waits for the frame it draws (every key here changes what's drawn) */
+async function press(term: ReturnType<typeof terminal>, k: string) {
+  const n = term.writes.length;
+  term.stdin.write(k);
+  await until(() => term.writes.length > n);
+}
 
 /**
  * The TUI on a real agent (the CLI's pieces, a scripted provider, `plugins` loaded as `extra`) in a fake terminal.
@@ -58,7 +72,8 @@ async function tui(
     await cli.close();
     await restore();
   });
-  await settle();
+  // drawn, and the input's raw mode on (its effects, the App's own among them, have run)
+  if (app) await until(() => term.raw.includes(true));
   return { cli, term, app, provider, session, screen: () => term.frame().join("\n") };
 }
 
@@ -103,10 +118,12 @@ test("asks race the dialog: a late handler closes it; answering in the dialog fi
   const rec = record();
   let late = true;
   const aborted: boolean[] = [];
+  // the handler answers once the test lets it: after the dialog showed, or after the dialog answered
+  let held = gate();
   const remote: Plugin = {
     on: {
       ask: async (p) => {
-        await sleep(50);
+        await held.promise;
         aborted.push(p.signal.aborted);
         if (late) p.resolve("remote");
       },
@@ -121,20 +138,22 @@ test("asks race the dialog: a late handler closes it; answering in the dialog fi
   const asked = cli.agent.ctx.ask({ question: "Deploy?", options: [{ label: "yes" }, { label: "no" }] });
   await until(() => /Deploy\?/.test(screen()), 5000);
   assert.equal(rec.events.filter((e) => e.name === "attention").length, 1);
+  held.resolve();
   assert.equal(await asked, "remote");
-  await settle();
+  await until(() => !/Deploy\?/.test(screen()));
   assert.doesNotMatch(screen(), /Deploy\?/);
   assert.equal(cli.ui.getState().asks.length, 0);
 
   // now the dialog answers first (↓ then Enter picks "no"), and the handler finds its signal aborted
   late = false;
+  held = gate();
   const second = cli.agent.ctx.ask({ question: "Deploy?", options: [{ label: "yes" }, { label: "no" }] });
-  await sleep(20);
-  term.stdin.write("\x1b[B");
-  await sleep(10);
+  await until(() => /Deploy\?/.test(screen()));
+  await press(term, "\x1b[B");
   term.stdin.write("\r");
   assert.equal(await second, "no");
-  await sleep(60);
+  held.resolve();
+  await until(() => aborted.length === 2);
   assert.deepEqual(aborted, [false, true]);
 });
 
@@ -167,11 +186,10 @@ test("two asks at once show one after the other, while other handlers see both a
   assert.deepEqual(seen, ["First?", "Second?"]);
   assert.match(screen(), /First\?/);
   assert.doesNotMatch(screen(), /Second\?/);
-  term.stdin.write("one");
-  await sleep(20);
+  await press(term, "one");
   term.stdin.write("\r");
   assert.equal(await a, "one");
-  await settle();
+  await until(() => /Second\?/.test(screen()));
   assert.match(screen(), /Second\?/);
   // Esc dismisses it
   term.stdin.write("\x1b");
@@ -185,13 +203,12 @@ test("a secret ask masks what's typed, and the answer reaches no entry or sessio
     plugins: [{ name: "tools", plugin: { tools: [askTool(answers, { question: "Token?", secret: true })] } }],
   });
   assert.equal(cli.submit("go"), true);
-  await settle();
-  term.stdin.write("hunter2");
-  await settle();
+  await until(() => /Token\?/.test(screen()));
+  await press(term, "hunter2");
   assert.match(screen(), /\*{7}/);
   assert.doesNotMatch(screen(), /hunter2/);
   term.stdin.write("\r");
-  await settle(200);
+  await until(() => answers.length === 1 && !cli.ui.getState().busy);
   assert.deepEqual(answers, ["hunter2"]);
   // the tool chose to return it (its result is the model's), but nothing the dialog did shows or saves it otherwise
   const entries = cli.ui.getState().entries.filter((e) => e.kind !== "tool");
@@ -201,17 +218,14 @@ test("a secret ask masks what's typed, and the answer reaches no entry or sessio
 });
 
 test("multi and allowText dialogs answer arrays and free text", async (t) => {
-  const { cli, term } = await tui(t);
+  const { cli, term, screen } = await tui(t);
   const multi = cli.agent.ctx.ask({
     question: "Which?",
     multi: true,
     options: [{ label: "a" }, { label: "b" }, { label: "c" }],
   });
-  await sleep(20);
-  for (const key of [" ", "\x1b[B", "\x1b[B", " ", "\r"]) {
-    term.stdin.write(key);
-    await sleep(15);
-  }
+  await until(() => /Which\?/.test(screen()));
+  for (const key of [" ", "\x1b[B", "\x1b[B", " ", "\r"]) await press(term, key);
   assert.deepEqual(await multi, ["a", "c"]);
   // once a filter is typed, Space is part of it and Tab ticks
   const filtered = cli.agent.ctx.ask({
@@ -219,16 +233,12 @@ test("multi and allowText dialogs answer arrays and free text", async (t) => {
     multi: true,
     options: [{ label: "red fox" }, { label: "red hen" }, { label: "blue" }],
   });
-  await sleep(20);
-  for (const key of ["red h", "\t", "\r"]) {
-    term.stdin.write(key);
-    await sleep(15);
-  }
+  await until(() => /red fox/.test(screen()));
+  for (const key of ["red h", "\t", "\r"]) await press(term, key);
   assert.deepEqual(await filtered, ["red hen"]);
   const text = cli.agent.ctx.ask({ question: "Name?", options: [{ label: "default" }], allowText: true });
-  await sleep(20);
-  term.stdin.write("mine");
-  await sleep(15);
+  await until(() => /Name\?/.test(screen()));
+  await press(term, "mine");
   term.stdin.write("\r");
   assert.equal(await text, "mine");
 });
@@ -276,7 +286,7 @@ test("a plugin command runs from the / menu with a host ctx that can ask and sen
       },
     ],
   };
-  const { cli, term, session } = await tui(t, {
+  const { cli, term, session, screen } = await tui(t, {
     turns: [
       async () => {
         await held;
@@ -294,20 +304,22 @@ test("a plugin command runs from the / menu with a host ctx that can ask and sen
   // a plain prompt is refused while the turn runs; a command isn't
   assert.equal(cli.submit("another"), false);
   cli.setInput("/dep");
-  await sleep(20);
+  await until(() => /\/deploy/.test(screen()));
   term.stdin.write("\t");
   await until(() => cli.ui.getState().input === "/deploy ", 5000);
-  term.stdin.write("prod");
-  await sleep(20);
+  await press(term, "prod");
   term.stdin.write("\r");
-  await until(() => cli.ui.getState().input === "", 5000);
+  await until(() => /Deploy prod\?/.test(screen()), 5000);
   term.stdin.write("\r");
-  await until(() => cli.ui.getState().entries.at(-1)?.kind === "info", 5000);
+  await until(() => {
+    const e = cli.ui.getState().entries.at(-1);
+    return e?.kind === "info" && "text" in e && e.text.startsWith("deploy");
+  }, 5000);
   const last = cli.ui.getState().entries.at(-1);
   assert.deepEqual(last && "text" in last && [last.kind, last.text], ["info", "deploy prod: yes"]);
   release();
-  await settle();
   // the context send joined the session beside the turn
+  await until(() => session.getState().messages.some((m) => m.role === "user" && m.content === "deployed prod"));
   assert.ok(session.getState().messages.some((m) => m.role === "user" && m.content === "deployed prod"));
 });
 
@@ -317,7 +329,7 @@ test("status events fill UiState.statuses (drawn by the status bar); notify adds
   await cli.agent.ctx.notify("heads up", "warn");
   await cli.agent.ctx.notify("broken", "error");
   await cli.agent.ctx.notify("fyi");
-  await settle();
+  await until(() => /73% left/.test(screen()));
   assert.deepEqual(cli.ui.getState().statuses, { quota: { text: "73% left" } });
   assert.match(screen(), /73% left/);
   assert.deepEqual(
@@ -347,9 +359,11 @@ test("a prompt override that doesn't render Default gets Esc and the run goes on
       },
     },
   };
+  // the turn runs until the test lets it finish, or it's aborted
+  const finish = gate();
   const slow: Turn = async (req) => {
     await new Promise((r) => {
-      setTimeout(r, 300);
+      finish.promise.then(r);
       req.signal?.addEventListener("abort", r);
     });
     return { text: req.signal?.aborted ? "" : "finished" };
@@ -358,27 +372,41 @@ test("a prompt override that doesn't render Default gets Esc and the run goes on
   assert.match(a.screen(), /my prompt/);
   // an ask's dialog takes the takeover's place while it's pending
   const asked = a.cli.agent.ctx.ask({ question: "Shown?", options: [{ label: "yes" }] });
-  await settle();
+  await until(() => /Shown\?/.test(a.screen()));
   assert.match(a.screen(), /Shown\?/);
   assert.doesNotMatch(a.screen(), /my prompt/);
   a.term.stdin.write("\r");
   assert.equal(await asked, "yes");
-  await settle();
+  await until(() => /my prompt/.test(a.screen()));
   assert.match(a.screen(), /my prompt/);
   a.cli.submit("hi");
-  await sleep(30);
+  await until(() => a.cli.ui.getState().busy);
   a.term.stdin.write("\x1b");
-  await settle(400);
+  await until(() => keys.length > 0);
   assert.deepEqual(keys, ["esc"]);
+  // not aborted: once let go, the turn finishes
+  finish.resolve();
+  await until(() => !a.cli.ui.getState().busy);
   const texts = a.cli.ui.getState().entries.map((e) => ("text" in e ? e.text : ""));
   assert.ok(texts.includes("finished"));
   a.app?.unmount();
 
-  const b = await tui(t, { turns: [slow] });
+  const unfinished = gate();
+  const b = await tui(t, {
+    turns: [
+      async (req) => {
+        await new Promise((r) => {
+          unfinished.promise.then(r);
+          req.signal?.addEventListener("abort", r);
+        });
+        return { text: "" };
+      },
+    ],
+  });
   b.cli.submit("hi");
-  await sleep(30);
+  await until(() => b.cli.ui.getState().busy);
   b.term.stdin.write("\x1b");
-  await settle(200);
+  await until(() => !b.cli.ui.getState().busy);
   assert.match(b.cli.ui.getState().entries.at(-1)?.kind === "error" ? "Interrupted" : "", /Interrupted/);
 });
 
@@ -433,7 +461,8 @@ test("cli.suspend leaves the alternate screen and raw mode while fn runs, and re
     interactive: true,
   });
   t.after(() => app.unmount());
-  await settle();
+  // the App's effects (attaching Ink's terminal to the cli) ran with the input's raw mode
+  await until(() => term.raw.includes(true));
   const marks = () => term.writes.join("");
   for (const fail of [false, true]) {
     term.writes.length = 0;
@@ -446,7 +475,6 @@ test("cli.suspend leaves the alternate screen and raw mode while fn runs, and re
     });
     if (fail) await assert.rejects(run, /child failed/);
     else assert.equal(await run, "ok");
-    await settle(50);
     const before = during[0] ?? "";
     assert.ok(before.includes("\x1b[?1049l"), "left the alternate screen");
     assert.ok(before.includes("\x1b[?1002l"), "mouse reporting off");
@@ -460,10 +488,9 @@ test("cli.suspend leaves the alternate screen and raw mode while fn runs, and re
 test("cli.setInput changes the prompt's text; submitting clears it", async (t) => {
   const { cli, screen } = await tui(t, { turns: [{ text: "hi back" }] });
   cli.setInput("drafted by a plugin");
-  await settle();
-  assert.match(screen(), /> drafted by a plugin/);
+  await until(() => /> drafted by a plugin/.test(screen()));
   assert.equal(cli.submit(cli.ui.getState().input), true);
-  await settle();
+  await until(() => !cli.ui.getState().busy && !/> drafted/.test(screen()));
   assert.equal(cli.ui.getState().input, "");
   assert.doesNotMatch(screen(), /> drafted/);
 });
@@ -520,7 +547,7 @@ test("cli.entries renders text kinds, plugin messages by <plugin>:<type>, tool:*
   await cli.agent.ctx.send({ content: "displayed", meta: { plugin: "x", type: "other", display: true } });
   cli.push({ kind: "x:banner", text: "welcome" });
   cli.submit("question");
-  await settle(250);
+  await until(() => !cli.ui.getState().busy && /ASSISTANT\n.*answer/.test(screen()));
   const s = screen();
   assert.match(s, /NOTE noted 7/);
   assert.doesNotMatch(s, /hidden|unrendered/);
@@ -570,17 +597,16 @@ test("Ctrl+O flips expanded for every tool block; partial input reaches a render
     ],
   });
   cli.submit("go");
-  await settle();
-  assert.ok(views.some((v) => v.partial === '{"q":'));
+  await until(() => views.some((v) => v.partial === '{"q":'));
   release();
-  await settle(200);
+  await until(() => !cli.ui.getState().busy && /GROUP a\+b shut/.test(screen()) && /^end$/m.test(screen()));
   const rows = screen().split("\n");
   const at = rows.findIndex((r) => r.includes("GROUP a+b shut"));
   assert.ok(at >= 0);
   // the group's block, its bottom background row, then the gap before the reply: no rows for b's empty block
   assert.deepEqual(rows.slice(at + 1, at + 4), ["", "", "end"]);
-  term.stdin.write("\x0f");
-  await settle();
+  await press(term, "\x0f");
+  await until(() => /GROUP a\+b open/.test(screen()));
   assert.match(screen(), /GROUP a\+b open/);
   assert.equal(cli.ui.getState().expanded, true);
 });
@@ -597,14 +623,23 @@ test("theme packs register themes; config.theme picks one; /theme switches live"
   assert.equal(cli.ui.getState().theme, "blue");
   const { theme } = await import("./themes.ts");
   assert.equal(theme.accent, "#0000ff");
+  const config = join(process.env.HOME ?? "", ".hortus", "config.json");
+  const savedTheme = () => {
+    try {
+      return JSON.parse(readFileSync(config, "utf8")).theme;
+    } catch {
+      return undefined;
+    }
+  };
   assert.equal(cli.submit("/theme red"), true);
-  await settle();
+  await until(() => cli.ui.getState().theme === "red" && savedTheme() === "red");
   assert.equal(cli.ui.getState().theme, "red");
   assert.equal(theme.accent, "#ff0000");
-  const saved = JSON.parse(await readFile(join(process.env.HOME ?? "", ".hortus", "config.json"), "utf8"));
+  const saved = JSON.parse(await readFile(config, "utf8"));
   assert.equal(saved.theme, "red");
+  const count = cli.ui.getState().entries.length;
   assert.equal(cli.submit("/theme nope"), true);
-  await settle();
+  await until(() => cli.ui.getState().entries.length > count);
   const last = cli.ui.getState().entries.at(-1);
   assert.match(last && "text" in last ? last.text : "", /Unknown theme: nope/);
   cli.setTheme("dark");
@@ -633,13 +668,13 @@ test("a cli.complete wrapper adds @file rows and keeps the / command rows from D
   };
   const { cli, term, screen } = await tui(t, { plugins: [{ name: "files", plugin: files }] });
   cli.setInput("look at @b");
-  await settle();
+  await until(() => /src\/b\.ts/.test(screen()));
   assert.match(screen(), /src\/b\.ts/);
   term.stdin.write("\t");
-  await settle();
+  await until(() => cli.ui.getState().input !== "look at @b");
   assert.equal(cli.ui.getState().input, "look at @src/b.ts ");
   cli.setInput("/the");
-  await settle();
+  await until(() => /\/theme \[name\]/.test(screen()));
   assert.match(screen(), /\/theme \[name\]/);
 });
 
@@ -664,14 +699,13 @@ test("cli:compaction: /compact draws the summary as one line, and a resumed sess
   });
   for (const text of ["one", "two"]) {
     assert.equal(cli.submit(text), true);
-    await settle();
+    await until(() => !cli.ui.getState().busy);
   }
   assert.equal(cli.submit("/compact"), true);
-  await settle();
-  assert.match(screen(), /◆ compacted Ship the parser/);
+  await until(() => /◆ compacted Ship the parser/.test(screen()));
   const resumed = await openSession(session.leafId as string, dirname(session.path as string));
   assert.equal(await cli.setSession(resumed, "resume"), true);
-  await settle();
+  await until(() => cli.ui.getState().entries.some((e) => e.kind === "builtin:compaction:summary"));
   assert.deepEqual(
     cli.ui
       .getState()

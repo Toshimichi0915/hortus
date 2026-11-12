@@ -163,9 +163,11 @@ async function tui(t: { after: (fn: () => unknown) => void }, provider: ReturnTy
   const cli = await startCli({ extra: [{ name: "scripted", plugin: { providers: { scripted: provider } } }] });
   const ui = renderApp(cli, { columns: 100, rows: 40 });
   t.after(() => ui.app.unmount());
+  // each key redraws the dialog: the next one is sent once this one took effect
   const key = async (k: string) => {
+    const before = ui.screen();
     ui.keys(k);
-    await sleep(30);
+    await until(() => ui.screen() !== before);
   };
   return { cli, screen: ui.screen, key };
 }
@@ -192,7 +194,7 @@ test("TUI: the rich dialog takes every answer, a typed one and notes included, a
   await key(" "); // tick Session store
   assert.match(screen(), /✓ Session store/);
   await key("n"); // a note on this answer
-  for (const c of "hot writes") await key(c);
+  await key("hot writes"); // typed as one chunk: a lone space would redraw nothing
   await key(ENTER);
   await key(ENTER); // submit the ticked one: on to the Submit tab
   assert.match(
@@ -200,7 +202,7 @@ test("TUI: the rich dialog takes every answer, a typed one and notes included, a
     /Review before submitting[\s\S]*Cache TTL 5m[\s\S]*Scope Session store[\s\S]*note: hot writes/,
   );
   await key("n"); // a global note
-  for (const c of "ship it") await key(c);
+  await key("ship it"); // typed as one chunk: a lone space would redraw nothing
   await key(ENTER);
   await key(ENTER);
   await until(() => provider.requests.length === 2);
@@ -231,7 +233,7 @@ test("TUI: a typed answer replaces the options; c collapses the dialog to one li
   await key(DOWN);
   await key(DOWN);
   await key(ENTER); // Type something.
-  for (const c of "ARC") await key(c);
+  await key("ARC");
   await key(ENTER); // one question: submits
   await until(() => provider.requests.length === 2);
   assert.equal(sent(provider, 1), "Answers:\n- Cache: ARC");
@@ -263,6 +265,7 @@ test("the countdown starts when the ask is shown, and someone engaging it stops 
   const answerer = {
     on: {
       ask: async (e: AskEvent) => {
+        // real time on purpose: the 1s countdown must start at show(), not at the ask, and stop on engage()
         await sleep(400);
         e.show();
         if (!engage) return void (await e.answered);

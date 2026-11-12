@@ -36,7 +36,7 @@ test("remote: a send from outside any run starts a turn in the CLI, and its even
     body: JSON.stringify({ text: "hi from afar" }),
   });
   assert.equal(sent.status, 202);
-  for (let i = 0; i < 200 && !streamed.includes('"idle"'); i++) await sleep(10);
+  await until(() => streamed.includes('"idle"'));
 
   const shown = cli.ui.getState().entries.flatMap((e) => (e.kind === "user" || e.kind === "assistant" ? [e.text] : []));
   assert.deepEqual(shown, ["\nhi from afar\n", "on it"]);
@@ -67,14 +67,13 @@ test("remote: a client answers an ask while the TUI's dialog is open, closing it
   const reading = (async () => {
     for (let r = await reader?.read(); r && !r.done; r = await reader?.read()) streamed += Buffer.from(r.value);
   })();
-  await sleep(20);
   let engaged = false;
   const asked = cli.agent.ctx.ask(
     { question: "Deploy?", options: [{ label: "yes" }, { label: "no" }] },
     { detailed: true },
   );
   void cli.ui.getState().asks[0]?.engaged.then(() => (engaged = true));
-  for (let i = 0; i < 100 && !streamed.includes('"ask"'); i++) await sleep(10);
+  await until(() => streamed.includes('"ask"'));
   // the TUI shows its dialog meanwhile
   assert.equal(cli.ui.getState().asks[0]?.question, "Deploy?");
   const ask = streamed
@@ -94,7 +93,7 @@ test("remote: a client answers an ask while the TUI's dialog is open, closing it
   assert.equal(res.status, 204);
   assert.deepEqual(await asked, { answer: "no", by: "remote", reason: "answered" });
   assert.equal(cli.ui.getState().asks.length, 0);
-  for (let i = 0; i < 100 && !streamed.includes('"answered"'); i++) await sleep(10);
+  await until(() => streamed.includes('"answered"'));
   assert.match(streamed, new RegExp(`"answered","payload":\\{"id":"${ask.id}"`));
   // answered already: nothing to answer
   const again = await fetch(`${url}/answer`, {
@@ -118,12 +117,11 @@ test("remote: an ask waiting on a client fails closed once the last client leave
   const reading = (async () => {
     for (let r = await reader?.read(); r && !r.done; r = await reader?.read()) streamed += Buffer.from(r.value);
   })().catch(() => {});
-  await sleep(20);
   let settled = false;
   const asked = agent.ctx.ask({ question: "Deploy?" }).finally(() => (settled = true));
-  for (let i = 0; i < 100 && !streamed.includes('"ask"'); i++) await sleep(10);
+  await until(() => streamed.includes('"ask"'));
   assert.match(streamed, /"Deploy\?"/);
-  await sleep(30);
+  await sleep(30); // negative check: a (wrong) fail-closed would settle by now
   assert.equal(settled, false, "held while a client could answer");
   leave.abort();
   assert.equal(await asked, undefined);

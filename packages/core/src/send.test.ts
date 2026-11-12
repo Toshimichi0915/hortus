@@ -8,7 +8,7 @@ import type { Ctx, Events, Message, Plugin, RunEnd } from "./llm.ts";
 import { tool } from "./llm.ts";
 import type { LoadOptions, Named } from "./plugins.ts";
 import { openSession, type PluginEntry, type SessionEntry, type SessionState } from "./session.ts";
-import { record, scripted, type Turn, tempHome } from "./testing.ts";
+import { record, scripted, type Turn, tempHome, until } from "./testing.ts";
 
 const echo = tool({
   name: "echo",
@@ -49,12 +49,6 @@ const texts = (messages: readonly Message[] = []) =>
   messages.map((m) =>
     m.role === "user" ? m.content : m.role === "assistant" ? m.text : m.results.map((r) => r.output).join(),
   );
-
-/** Resolves once `cond` holds (checked every 5 ms), failing after 2 s. */
-async function until(cond: () => boolean) {
-  for (let i = 0; i < 400 && !cond(); i++) await sleep(5);
-  assert.ok(cond(), "timed out");
-}
 
 const state = (key: string) => ({
   state: (e: PluginEntry, s: SessionState) => {
@@ -120,11 +114,12 @@ test("request messages carry their session entryId; run saves each message as it
 });
 
 test("two concurrent runs on different sessions keep their messages apart, on plugins loaded once", async (t) => {
+  // each reply waits until both runs have asked: they overlap
   const reply: Turn = async (req) => {
-    await sleep(10);
+    await until(() => provider.requests.length === 2);
     return { text: `re: ${texts(req.messages).join("|")}` };
   };
-  const { agent, payloads } = await setup(t, [reply, reply]);
+  const { agent, provider, payloads } = await setup(t, [reply, reply]);
   const [a, b] = [await openSession(null), await openSession(null)];
   await Promise.all([agent.run("a", { session: a }), agent.run("b", { session: b })]);
   assert.deepEqual(texts(a.getState().messages), ["a", "re: a"]);
@@ -148,7 +143,7 @@ test("exit: the running run's run_end (aborted), then session_close(exit) ignori
       },
     },
   };
-  const { agent } = await setup(
+  const { agent, provider } = await setup(
     t,
     [
       (req) =>
@@ -159,7 +154,7 @@ test("exit: the running run's run_end (aborted), then session_close(exit) ignori
     [{ name: "p", plugin }],
   );
   const running = agent.run("hi");
-  await sleep(20);
+  await until(() => provider.requests.length === 1);
   const started = Date.now();
   await agent.close({ timeout: 100 });
   assert.ok(Date.now() - started < 1000);
@@ -282,6 +277,7 @@ test("steer from run_end starts a run (a goal loop) with no idle between; from a
   );
   assert.deepEqual(texts(session.getState().messages), ["hi", "one", "again", "two"]);
   await agent.ctx.preview(session.getState().messages);
+  // a negative check: no run may start, so nothing to await
   await sleep(30);
   assert.equal(provider.requests.length, 2);
   assert.equal(names().filter((n) => n === "idle").length, 1);
@@ -313,7 +309,7 @@ test("a host ctx kept from init targets the current session from a timer; after 
   await agent.run("b");
   const next = await openSession(null);
   await agent.setSession(next, "new");
-  await new Promise<void>((resolve) => setTimeout(() => void host?.send("ping").then(() => resolve()), 10));
+  await new Promise<void>((resolve) => setImmediate(() => void host?.send("ping").then(() => resolve())));
   assert.deepEqual(texts(next.getState().messages), ["ping"]);
   assert.equal(host?.session, next);
   assert.equal(session.getState().messages.length, 4);
@@ -390,12 +386,11 @@ test("ctx.run has the model's info and who started the run; turn_start counts th
 test("a host ctx's abort and busy cover only its session's runs", async (t) => {
   const hang: Turn = (req) =>
     new Promise((_, reject) => req.signal?.addEventListener("abort", () => reject(new Error("aborted"))));
-  const { agent, session } = await setup(t, [hang, hang]);
+  const { agent, provider, session } = await setup(t, [hang, hang]);
   const other = await openSession(null);
   const here = agent.run("a");
   const there = agent.run("b", { session: other });
-  await until(() => agent.ctx.busy());
-  await sleep(10);
+  await until(() => provider.requests.length === 2);
   agent.ctx.abort("stop");
   assert.deepEqual((await here)?.aborted, { by: "host", reason: "stop" });
   assert.equal(agent.ctx.busy(), false);
@@ -572,12 +567,13 @@ test("run_end.messages is the session's messages, a send made without awaiting i
 });
 
 test("a second run on a session waits for the first to end; idle fires once, after both", async (t) => {
+  let bStarted = false;
   const slow = tool({
     name: "slow",
     description: "Slow",
     inputSchema: z.object({}),
     execute: async () => {
-      await sleep(30);
+      await until(() => bStarted);
       return "done";
     },
   });
@@ -589,6 +585,7 @@ test("a second run on a session waits for the first to end; idle fires once, aft
   const a = agent.run("A");
   await until(() => provider.requests.length === 1);
   const b = agent.run("B");
+  bStarted = true;
   await Promise.all([a, b]);
   assert.deepEqual(
     provider.requests.map((r) => texts(r.messages)),

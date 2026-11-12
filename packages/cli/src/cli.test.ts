@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
+import { isDeepStrictEqual } from "node:util";
 import {
   type Agent,
   type Command,
@@ -25,9 +26,13 @@ const on = (session: Session) => ({ session }) as Ctx;
 
 test("status follows the session's model and provider, and a stale resolve doesn't overwrite a newer one", async (t) => {
   const session = await openSession(null, await tempDir(t, "hortus-"));
+  // resolving "slow" finishes once the test lets it: after a later change to "fast" showed
+  let release = () => {};
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
   const resolve = async ({ model = "m0", provider = "p0" }: { model?: string; provider?: string }) => {
-    // resolving "slow" finishes after a later change to "fast"
-    if (model === "slow") await sleep(50);
+    if (model === "slow") await held;
     // m1 reports its efforts, the others don't
     const info = async (m: string) => ({ contextWindow: 1000, efforts: m === "m1" ? ["off", "high"] : undefined });
     return { name: provider, model, provider: { info } };
@@ -40,19 +45,26 @@ test("status follows the session's model and provider, and a stale resolve doesn
     ctx: { emit: async () => {} },
   } as unknown as Agent;
   const cli = await createCli(session, async () => agent);
-  const status = async () => {
-    await sleep(10);
+  const status = async (expected: unknown) => {
+    await until(() => isDeepStrictEqual(cli.ui.getState().status, expected));
     return cli.ui.getState().status;
   };
-  assert.deepEqual(await status(), { name: "p0", model: "m0", window: 1000, efforts: undefined });
+  const m0 = { name: "p0", model: "m0", window: 1000, efforts: undefined };
+  assert.deepEqual(await status(m0), m0);
   await session.setModel("m1");
-  assert.deepEqual(await status(), { name: "p0", model: "m1", window: 1000, efforts: ["off", "high"] });
+  const m1 = { name: "p0", model: "m1", window: 1000, efforts: ["off", "high"] };
+  assert.deepEqual(await status(m1), m1);
   await session.setProvider("p1");
-  assert.deepEqual(await status(), { name: "p1", model: "m1", window: 1000, efforts: ["off", "high"] });
+  const p1 = { name: "p1", model: "m1", window: 1000, efforts: ["off", "high"] };
+  assert.deepEqual(await status(p1), p1);
   await session.setModel("slow");
   await session.setModel("fast");
   await until(() => cli.ui.getState().status?.model === "fast", 5000);
-  await sleep(80); // the slow, stale status would land by now
+  await until(() => cli.ui.getState().status?.window === 1000);
+  // the slow resolve finishes now; what follows it is promise-chained (no timers), so it has landed by the next macrotask
+  release();
+  await held;
+  await new Promise(setImmediate);
   assert.deepEqual(cli.ui.getState().status, { name: "p1", model: "fast", window: 1000, efforts: undefined });
 });
 
@@ -62,7 +74,8 @@ test("streamed deltas reach the store once a frame, and none are lost when the r
   let observer: Plugin | undefined;
   const run = async () => {
     for (const d of ["a", "b", "c"]) await observer?.on?.text?.(d, ctx);
-    await sleep(60);
+    // the frame's timer flushes "abc"
+    await until(() => lives.length === 1);
     await observer?.on?.text?.("d", ctx);
     // ends the reply before the "d" frame fires
     await observer?.on?.message?.({ role: "assistant", text: "abcd", toolCalls: [] }, ctx);
@@ -179,7 +192,6 @@ test("a run on another session draws nothing; effort set on the shown session fr
       ],
     }),
   );
-  await sleep(10);
   const before = cli.ui.getState().entries;
   const other = await openSession(null);
   await cli.agent.run("other's prompt", { session: other });
@@ -270,7 +282,7 @@ test("a tool block shows its call, then each update's details, then its result, 
     seen.push(b && { result: b.result, details: b.details });
   };
   cli.submit("go");
-  await sleep(20);
+  await until(() => !cli.ui.getState().busy);
   assert.deepEqual(seen, [
     { result: undefined, details: undefined },
     { result: undefined, details: { progress: 0.5 } },
@@ -355,7 +367,6 @@ test("an idle handler awaiting the run its steer starts doesn't hang the CLI", a
       ],
     }),
   );
-  await sleep(10);
   cli.submit("hi");
   await until(() => !cli.ui.getState().busy && !!ended, 5000);
   assert.ok(ended);
@@ -395,9 +406,8 @@ test("a run a send starts on a session not shown leaves the prompt free and keep
       ],
     }),
   );
-  await sleep(10);
   await cli.agent.run("hi", { session: other });
-  await sleep(30);
+  await until(() => busy.length === 1);
   assert.deepEqual(busy, [false]);
   assert.deepEqual(
     provider.requests.map((r) => r.effort),
@@ -435,12 +445,13 @@ test("/new and /resume fire session_close then session_open; a cancelled close k
       ],
     }),
   );
-  await sleep(10);
   // config.json's effort, until a session has its own
   assert.equal(cli.ui.getState().effort, "medium");
   const run = async (line: string) => {
+    const [session, last] = [cli.session, cli.ui.getState().entries.at(-1)];
     assert.equal(cli.submit(line), true);
-    await sleep(30);
+    // a command switches the session, or adds a line
+    await until(() => cli.session !== session || cli.ui.getState().entries.at(-1) !== last);
     const e = cli.ui.getState().entries.at(-1);
     return e?.kind === "tool" ? e.call.name : e?.text;
   };
@@ -455,7 +466,7 @@ test("/new and /resume fire session_close then session_open; a cancelled close k
   const stop = cli.ui.subscribe((s, prev) => void (s.effort !== prev.effort && efforts.push(s.effort)));
   cli.setEffort("medium");
   cli.setEffort("high");
-  await sleep(10);
+  await sleep(10); // a negative check: no change lands as the session's saves do, nothing to await
   stop();
   assert.deepEqual(efforts, ["medium", "high"]);
   assert.equal(cli.session.getState().effort, "high");

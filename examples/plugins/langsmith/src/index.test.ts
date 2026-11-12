@@ -61,7 +61,7 @@ test("langsmith posts each run's tree (turns, LLM and tool runs) in batches, thr
     execute: async (_, ctx) => {
       ctx.update({ step: 1 });
       // past the 250 ms batch delay: the runs open so far are posted, their ends patched in a later batch
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await until(() => ls.batches.length > 0);
       return (await ctx.complete({ messages: [{ role: "user", content: "inner" }] })).text;
     },
   });

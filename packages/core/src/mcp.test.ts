@@ -325,7 +325,7 @@ test("builtin:mcp: the host ctx has the MCP tools once connected (outside runs t
   const plugin: Plugin = {
     on: {
       init: async () => {
-        await new Promise((r) => setTimeout(r, 20));
+        await new Promise(setImmediate);
         initDone = true;
       },
       // state set by an async init is there when servers are asked for
@@ -355,11 +355,12 @@ test("connectMcp: a server that doesn't answer in time fails like one that error
   const mcp = await connectMcp(
     { mcpServers: { slow: { url: `http://127.0.0.1:${port}/mcp` }, test: echoServer } },
     [],
-    300,
+    // long enough for the echo server (a spawned node) to start on a loaded machine; the hung one always times out
+    1500,
   );
   t.after(() => mcp.close());
   assert.ok(Date.now() - started < 5000);
-  assert.deepEqual(mcp.errors, ["MCP server slow: timed out after 0.3s"]);
+  assert.deepEqual(mcp.errors, ["MCP server slow: timed out after 1.5s"]);
   assert.deepEqual(
     mcp.tools.map((t) => t.name),
     ["mcp__test__echo_it"],

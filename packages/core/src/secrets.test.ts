@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { loadSecrets, updateSecret, withFileLock } from "./secrets.ts";
-import { tempDir, tempHome } from "./testing.ts";
+import { tempDir, tempHome, until } from "./testing.ts";
 
 const lockOf = async (t: TestContext) => {
   const path = join(await tempDir(t), "f");
@@ -39,10 +39,13 @@ test("withFileLock calls in one process wait for each other", async (t) => {
   const hold = (name: string, ms: number) =>
     withFileLock(path, async () => {
       order.push(`${name} in`);
+      // a negative window: b, called meanwhile, must not get in (its waiting isn't observable)
       await sleep(ms);
       order.push(`${name} out`);
     });
-  await Promise.all([hold("a", 100), sleep(10).then(() => hold("b", 0))]);
+  const a = hold("a", 100);
+  await until(() => order.includes("a in"));
+  await Promise.all([a, hold("b", 0)]);
   assert.deepEqual(order, ["a in", "a out", "b in", "b out"]);
 });
 
@@ -58,6 +61,7 @@ test("withFileLock waits for a live holder however old its lock, and never remov
     // as if another holder had taken it meanwhile: this one's release leaves it alone
     await writeFile(lock, `${pid} someone-else`);
   });
+  // a negative check: nothing to await while it (rightly) keeps waiting
   await sleep(200);
   assert.equal(ran, false);
   await rm(lock);
@@ -91,14 +95,17 @@ test("the lock is re-entrant: secrets calls inside an update (or auth) don't wai
   const lock = join(process.env.HOME ?? "", ".hortus", "secrets.json.lock");
   let outer = "";
   let escaped: Promise<string> | undefined;
+  let release = () => {};
+  const released = new Promise<void>((r) => (release = r));
   await updateSecret("a", async (e) => {
     outer = await readFile(lock, "utf8");
     // was a 60s timeout: the nested call waited on its own lock
     await updateSecret("b", (b) => b && { ...b, apiKey: "b2" });
     // started inside, run after the lock is released: takes it again rather than slipping in
-    escaped = sleep(20).then(() => withFileLock(lock.slice(0, -5), () => readFile(lock, "utf8")));
+    escaped = released.then(() => withFileLock(lock.slice(0, -5), () => readFile(lock, "utf8")));
     return e && { ...e, apiKey: "a2" };
   });
+  release();
   assert.deepEqual(await loadSecrets(), { a: { type: "x", apiKey: "a2" }, b: { type: "x", apiKey: "b2" } });
   const again = await escaped;
   assert.ok(outer && again && again !== outer, `${outer} / ${again}`);
@@ -107,13 +114,15 @@ test("the lock is re-entrant: secrets calls inside an update (or auth) don't wai
 test("a callback from fn that fires while the lock is being released takes the lock rather than skipping it", async (t) => {
   const { path, lock } = await lockOf(t);
   let nested: Promise<string> | undefined;
+  let outerDone = false;
   await withFileLock(path, async () => {
     // fires after fn returns, during unlock's awaits
     setImmediate(() => {
       // outlives the outer unlock: run unlocked, it would find the lock removed under it
-      nested = withFileLock(path, () => sleep(20).then(() => readFile(lock, "utf8")));
+      nested = withFileLock(path, () => until(() => outerDone).then(() => readFile(lock, "utf8")));
     });
   });
+  outerDone = true;
   await new Promise((r) => setImmediate(r));
   assert.ok(nested);
   assert.match(await nested, /^\d+ /);

@@ -109,7 +109,8 @@ test("subagent --background: an ask the child settles itself is withdrawn from t
     if (last.content.startsWith("Background subagent")) return { text: "got it" };
     return { text: "asked " + globalThis.asked };
   }`;
-  // in the child, an autopilot answers its own ask after a moment
+  // in the child, an autopilot answers its own ask after a moment (real time, in the child process: the parent must
+  // have relayed the ask before it is withdrawn)
   const autopilot = {
     "hortus.json": JSON.stringify({ name: "autopilot", version: "0.0.0", entrypoint: "index.js" }),
     "index.js": `export default { on: {

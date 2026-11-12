@@ -829,11 +829,17 @@ test("a child woken by send after its session_closed(child) is closed again afte
 
 test("close waits for a child's slow session_closed(child) already started", async (t) => {
   const log: string[] = [];
+  let closing = false;
+  let release = () => {};
+  const slow = new Promise<void>((r) => (release = r));
   const plugin: Plugin = {
     on: {
       session_closed: async ({ reason }) => {
+        // released a macrotask after close's own session_closed(exit): close must still be waiting on this one
+        if (reason === "exit") setImmediate(release);
         if (reason !== "child") return;
-        await new Promise((r) => setTimeout(r, 50));
+        closing = true;
+        await slow;
         log.push("child closed");
       },
       close: () => void log.push("close"),
@@ -854,7 +860,7 @@ test("close waits for a child's slow session_closed(child) already started", asy
     ],
   );
   await agent.run("go");
-  await new Promise((r) => setTimeout(r, 5));
+  await until(() => closing);
   await agent.close();
   assert.deepEqual(log, ["child closed", "close"]);
 });

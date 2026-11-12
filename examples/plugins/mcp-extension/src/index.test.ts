@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,12 +7,13 @@ import { type TestContext, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { type CompletionRequest, createAgent, hortusDir, type ToolCall } from "@hortus/core";
 import { composeTools } from "@hortus/cli/testing";
-import { record, scripted, tempHome } from "@hortus/core/testing";
+import { record, scripted, tempHome, until } from "@hortus/core/testing";
 
 const dir = fileURLToPath(new URL("..", import.meta.url));
 
 /** A stdio MCP server: `echo-it` (reports progress), `wait` (until cancelled), `cancelled`, `pid`, and one resource. */
 const server = `
+import { writeFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod";
@@ -27,7 +29,7 @@ s.registerTool("echo-it", { description: "Echoes", inputSchema: { msg: z.string(
     return { content: [{ type: "text", text: "echo " + msg }] };
   });
 s.registerTool("wait", { description: "Waits until cancelled" }, (extra) =>
-  new Promise((done) => extra.signal.addEventListener("abort", () => { cancelled = true; done({ content: [] }); })));
+  new Promise((done) => (process.env.WAITING && writeFileSync(process.env.WAITING, ""), extra.signal.addEventListener("abort", () => { cancelled = true; done({ content: [] }); }))));
 s.registerTool("cancelled", { description: "Whether wait was cancelled" }, async () => ({ content: [{ type: "text", text: String(cancelled) }] }));
 s.registerTool("pid", { description: "The pid" }, async () => ({ content: [{ type: "text", text: String(process.pid) }] }));
 s.registerResource("readme", "file:///readme", { mimeType: "text/plain" }, async (uri) => ({ contents: [{ uri: uri.href, text: "hello resource" }] }));
@@ -215,13 +217,19 @@ test("mcp-extension: a host not yet interactive at ready asks about the project'
 });
 
 test("mcp-extension: aborting a run cancels the MCP call; close stops every server", async (t) => {
-  await setup(t, { mcpServers: { echo: { ...stdio, lifecycle: "eager" } } });
+  const tmp = await mkdtemp(join(tmpdir(), "mcp-ext-wait-"));
+  t.after(() => rm(tmp, { recursive: true, force: true }));
+  const waiting = join(tmp, "waiting");
+  await setup(t, { mcpServers: { echo: { ...stdio, env: { WAITING: waiting }, lifecycle: "eager" } } });
   const provider = scripted([{ toolCalls: [call("mcp_echo_wait")] }, { text: "unreached" }]);
   const agent = await createAgent({
     extra: [
       {
         name: "abort",
-        plugin: { on: { tool_call: (_, ctx) => void setTimeout(() => ctx.abort("test"), 200) } },
+        // abort once the server is running the call
+        plugin: {
+          on: { tool_call: (_, ctx) => void until(() => existsSync(waiting), 5000).then(() => ctx.abort("test")) },
+        },
       },
       { name: "scripted", plugin: { providers: { scripted: provider } } },
     ],

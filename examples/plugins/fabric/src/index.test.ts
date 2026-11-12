@@ -159,6 +159,7 @@ test("a program's timeout cancels its nested calls still running", async (t) => 
   const marker = join(await tempDir(t, "fabric-"), "ran");
   const { result } = await exec(`await pi.bash(${JSON.stringify(`sleep 0.5; touch ${marker}`)});`);
   assert.match(result?.output ?? "", /Program timed out after 100 ms/);
+  // real time: the cancelled `sleep 0.5` would have touched the marker by now (nothing to await on a process gone)
   await new Promise((r) => setTimeout(r, 800));
   assert.equal(existsSync(marker), false);
 });

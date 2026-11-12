@@ -198,7 +198,7 @@ test("goal: a goal prompt sent during a user run waits for it and passes input",
   const run = agent.run("hello");
   await until(() => provider.requests.length === 1);
   await goal("ship it");
-  await sleep(50);
+  await sleep(50); // a (wrong) steered kickoff would request by now
   // the kickoff waits for the user run instead of steering it
   assert.equal(provider.requests.length, 1);
   release();

@@ -9,7 +9,7 @@ import { createAgent } from "./agent.ts";
 import { hortusDir } from "./config.ts";
 import { type Answered, type AskEvent, type Ctx, type Plugin, tool } from "./llm.ts";
 import { memorySession } from "./session.ts";
-import { record, scripted, tempHome } from "./testing.ts";
+import { record, scripted, tempHome, until } from "./testing.ts";
 
 const provider = (turns: Parameters<typeof scripted>[0]) => ({
   name: "scripted",
@@ -67,6 +67,7 @@ test("show() and engage() settle `shown` and `engaged` for every handler: a coun
       ask: async (p) => {
         await p.shown;
         log.push("shown");
+        // the countdown under test: a real timer
         const timer = sleep(30).then(() => "timer");
         const why = await Promise.race([timer, p.engaged.then(() => "engaged")]);
         log.push(why);
@@ -77,11 +78,11 @@ test("show() and engage() settle `shown` and `engaged` for every handler: a coun
   const ui: Plugin = {
     on: {
       ask: async (p) => {
-        await sleep(20);
         p.show();
         if (p.question === "engage") {
           p.engage();
-          await sleep(50);
+          // answer only once the countdown has seen the key (else its timer would win)
+          await until(() => log.includes("engaged"));
           p.resolve("human");
         }
         await p.answered;
@@ -110,7 +111,7 @@ test("a handler reading `shown` still keeps the ask open until it settles, and m
     on: {
       ask: async (p) => {
         void p.shown.then(() => {});
-        await sleep(20);
+        await new Promise(setImmediate);
         p.resolve("yes");
       },
     },
@@ -147,10 +148,12 @@ test("asks race: the first answer wins and aborts the others' signal", async (t)
         ),
     },
   };
+  let remoteAnswered = false;
   const remote: Plugin = {
     on: {
       ask: async (p) => {
-        await sleep(50);
+        await new Promise(setImmediate);
+        remoteAnswered = true;
         p.resolve(["a", "b"]);
       },
     },
@@ -161,9 +164,8 @@ test("asks race: the first answer wins and aborts the others' signal", async (t)
       { name: "remote", plugin: remote },
     ],
   });
-  const started = Date.now();
   assert.deepEqual(await agent.ctx.ask({ question: "which?", multi: true }), ["a", "b"]);
-  assert.ok(Date.now() - started >= 45);
+  assert.ok(remoteAnswered);
   assert.deepEqual(aborted, ["dialog"]);
 });
 
@@ -191,8 +193,9 @@ test("aborting the run while an ask is pending resolves it undefined, and the to
         plugin: {
           on: {
             ask: (p) => {
-              setTimeout(() => controller.abort(), 20);
-              return new Promise((r) => p.signal.addEventListener("abort", () => r()));
+              const dismissed = new Promise<void>((r) => p.signal.addEventListener("abort", () => r()));
+              controller.abort();
+              return dismissed;
             },
           },
         },
@@ -275,7 +278,7 @@ test("agent.commands() lists plugin commands bound to their plugin's host ctx; a
   assert.equal(ctxs[0]?.run, undefined);
   assert.equal(ctxs[0]?.session, session);
   // the steer started a run with the answer, sourced from the command's plugin
-  await sleep(20);
+  await until(() => session.getState().messages.length === 2);
   assert.deepEqual(
     session.getState().messages.map((m) => (m.role === "user" ? m.content : m.role)),
     ["x yes", "assistant"],

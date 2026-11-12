@@ -15,7 +15,7 @@ import {
   type ToolCall,
 } from "@hortus/core";
 import { composeTools } from "@hortus/cli/testing";
-import { record, scripted, tempDir, tempHome, type Turn } from "@hortus/core/testing";
+import { record, scripted, tempDir, tempHome, type Turn, until } from "@hortus/core/testing";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
@@ -34,6 +34,7 @@ s.registerTool("echo-it", { description: "Echoes a message", inputSchema: { msg:
     const token = extra._meta?.progressToken;
     if (token !== undefined) {
       await extra.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: 1, total: 2, message: "half way" } });
+      // in the server: the SDK drops a notification that arrives in the same chunk as the result
       await new Promise((r) => setTimeout(r, 20));
     }
     return { content: [{ type: "text", text: "echo " + msg }] };
@@ -247,8 +248,7 @@ test("mcp-adapter: proxy, lazy servers and the cache, direct and search tools, a
     /Missing required argument: name\.\nUsage: \/mcp__alpha__greet <name>/,
   );
   assert.equal(await cmd("mcp__alpha__greet").run("name=Bob"), "Sent MCP prompt alpha/greet");
-  for (let i = 0; i < 200 && rec.events.filter((e) => e.name === "run_end").length < 2; i++)
-    await new Promise((r) => setTimeout(r, 10));
+  await until(() => rec.events.filter((e) => e.name === "run_end").length >= 2);
   assert.deepEqual(provider.requests.at(-1)?.messages.at(-1), { role: "user", content: "Hello Bob" });
 
   // a new agent: alpha's tools come from the cache (it isn't started), the project's server isn't asked about again,

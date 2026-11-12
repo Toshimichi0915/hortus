@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { type TestContext, test } from "node:test";
-import { setTimeout as sleep } from "node:timers/promises";
 import type { AskEvent, Ctx, Named } from "@hortus/core";
 import { scripted, type Turn, tempHome, until } from "@hortus/core/testing";
 import { renderToString, Text } from "ink";
@@ -22,7 +21,8 @@ async function tui(t: TestContext, plugins: Named[] = [], turns: Turn[] = []) {
     await cli.close();
     await restore();
   });
-  await sleep(50);
+  // drawn, and the input's raw mode on (its effects have run)
+  await until(() => ui.raw.includes(true));
   return { cli, provider, ...ui };
 }
 
@@ -54,16 +54,17 @@ test("cli.keys sees keys before the prompt and can take them: a taken Esc doesn'
   const { cli, keys, provider } = await tui(t, [{ name: "keys", plugin }], [first.turn]);
   keys("a");
   await until(() => cli.ui.getState().input === "a");
+  // cli.keys sees a key before the prompt does, in the same handler: once seen, the prompt had its chance
   keys("z");
-  await sleep(30);
+  await until(() => seen.includes("z"));
   assert.equal(cli.ui.getState().input, "a");
   keys("\x1b\r");
-  await sleep(30);
+  await until(() => seen.includes("alt+enter"));
   assert.equal(cli.ui.getState().input, "a");
   cli.submit("go");
   await until(() => provider.requests.length === 1);
   keys("\x1b");
-  await sleep(50);
+  await until(() => seen.includes("esc"));
   assert.equal(cli.ui.getState().busy, true, "the run wasn't aborted");
   first.release();
   await until(() => !cli.ui.getState().busy);
@@ -102,14 +103,16 @@ test("cli.submit wraps the built-in submit: a plugin sends while a turn runs, wh
 
 test("cli.setInput places the caret; UiState.caret follows typing; cli.copy writes OSC 52 and shows the count", async (t) => {
   const { cli, keys, screen, writes } = await tui(t);
+  let frames = writes.length;
   cli.setInput("world", { caret: 0 });
-  await sleep(20);
+  await until(() => writes.length > frames && /> world/.test(screen()));
   keys("hello ");
   await until(() => cli.ui.getState().input === "hello world");
   assert.equal(cli.ui.getState().caret, 6);
   // the same text, the caret moved
+  frames = writes.length;
   cli.setInput("hello world", { caret: 11 });
-  await sleep(20);
+  await until(() => writes.length > frames);
   keys("!");
   await until(() => cli.ui.getState().input === "hello world!");
   cli.copy("abc");
@@ -130,7 +133,7 @@ test("the generic dialog filters its options as you type; its first key engages 
   let engaged = false;
   void e.shown.then(() => (shown = true));
   void e.engaged.then(() => (engaged = true));
-  await sleep(10);
+  await until(() => shown);
   assert.deepEqual([shown, engaged], [true, false]);
   keys("lt");
   await until(() => /filter: lt/.test(screen()) && !/gamma/.test(screen()));

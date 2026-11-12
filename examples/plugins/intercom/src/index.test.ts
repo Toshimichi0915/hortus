@@ -228,7 +228,7 @@ test("the TUI: Alt+M picks a peer and sends what's typed; an incoming message sh
   ui.keys("\r");
   await until(() => /Message to the session/.test(ui.screen()), 5000);
   ui.keys("hello there");
-  await new Promise((r) => setTimeout(r, 20)); // separate key chunks
+  await until(() => /hello there/.test(ui.screen()), 5000);
   ui.keys("\r");
   await until(() => peer.messages.length > 0, 5000);
   const got = peer.messages[0];
@@ -277,7 +277,8 @@ test("busyDelivery human-first: a message arriving mid-run waits while a person'
   // a person's input waits for the run's end; the peer's message arrives meanwhile
   void agent.ctx.send("person first", { deliver: "after", source: "user" });
   await roster.send("alpha", "fyi");
-  await new Promise((r) => setTimeout(r, 200));
+  // the peer's message reached the plugin and is held (human-first) while the run goes on
+  await until(() => (agent.ctxOf("intercom").state.st as { queued: unknown[] } | undefined)?.queued.length === 1, 5000);
   release();
   await run;
   const users = () =>
