@@ -275,15 +275,25 @@ test("a skill runs as /skills:<name> and /<name>, without shadowing a command, a
   // the skills event, as core fires it for listSkills(agent.ctx)
   const ctx = { emit: async (_: string, p: { skills: unknown[] }) => void p.skills?.push(...list) };
   const cli = await createCli(session, async (o) => fakeAgent(o, { ctx }));
-  await sleep(10);
+  // skills are listed in the background (reading each SKILL.md): wait for them, never a fixed sleep
+  await until(() => !!findCommand(cli.commands, "review"));
   const body = `<skill name="review" location="${path}">\nReferences are relative to ${dir}.\n\nReview carefully.\n</skill>`;
+  /** submits, then waits until the session has `n` messages and the transcript has moved on */
+  const sent = async (value: string, n: number) => {
+    const before = last(cli);
+    assert.equal(cli.submit(value), true);
+    await until(() => texts(session).length === n && last(cli) !== before);
+    return last(cli);
+  };
   // the transcript shows the skill's name; the model gets its instructions
-  assert.equal(await send(cli, "/skills:review src"), "user: \n[skill] review\n\nsrc\n");
-  assert.equal(await send(cli, "/review"), "user: \n[skill] review\n");
+  assert.equal(await sent("/skills:review src", 1), "user: \n[skill] review\n\nsrc\n");
+  assert.equal(await sent("/review", 2), "user: \n[skill] review\n");
   assert.deepEqual(texts(session), [`${body}\n\nsrc`, body]);
   assert.equal(findCommand(cli.commands, "model")?.name, "model");
   list = [];
-  assert.equal(await send(cli, "hi"), "user: \nhi\n");
+  assert.equal(await sent("hi", 3), "user: \nhi\n");
+  // skills are listed again once a prompt has been handled
+  await until(() => !findCommand(cli.commands, "review"));
   assert.equal(cli.submit("/review"), false);
 });
 
