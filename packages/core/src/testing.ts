@@ -74,7 +74,7 @@ export interface HomeFiles {
   /** default: `{ scripted: { type: "scripted", apiKey: "scripted" } }`, for a `scripted` provider passed in `extra` */
   secrets?: Secrets;
   mcp?: McpConfig;
-  /** plugin dir name -> a directory to link there (a plugin on disk, e.g. `examples/plugins/<name>`) or its files */
+  /** plugin dir name -> a directory to link there (a plugin on disk) or its files */
   plugins?: Record<string, string | Record<string, string>>;
 }
 

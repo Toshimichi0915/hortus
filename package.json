@@ -33,11 +33,11 @@
   },
   "scripts": {
     "release": "semantic-release",
-    "build": "tsc -b packages/cli examples/plugins/*/tsconfig.json",
+    "build": "tsc -b packages/cli",
     "dev": "tsc -b packages/cli && node packages/cli/dist/index.js",
     "lint": "biome lint",
     "format": "biome format --write",
-    "test": "tsc -b packages/cli examples/plugins/*/tsconfig.json && node --test 'packages/*/dist/**/*.test.js' 'examples/plugins/*/dist/**/*.test.js'"
+    "test": "tsc -b packages/cli && node --test 'packages/*/dist/**/*.test.js'"
   },
   "keywords": [],
   "author": "",

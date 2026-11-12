@@ -1,7 +1,0 @@
-{
-  "extends": "../tsconfig.base.json",
-  // ponytail: pi-vcc's algorithms are ported as written (upstream indexes arrays freely); turn this back on when the
-  // port stops tracking upstream
-  "compilerOptions": { "noUncheckedIndexedAccess": false },
-  "references": [{ "path": "../../../packages/cli" }]
-}

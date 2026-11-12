@@ -782,7 +782,7 @@ export interface ProviderDef {
    * The entry to use now, e.g. with a refreshed OAuth token (`refresh` forces one); hortus saves it when it changed.
    * Called by `ctx.secrets.get`, so once per run (when it resolves the provider), under the secrets.json lock, with
    * the entry as stored; `fetch` is the host's. A token that can expire mid-run is refreshed by the provider itself, in
-   * its `fetch`, through `CreateOptions.auth` (see examples/plugins/oauth-wrap).
+   * its `fetch`, through `CreateOptions.auth` (as the oauth-wrap reference plugin does).
    */
   auth?(entry: Secret, opts: { refresh: boolean; fetch: typeof globalThis.fetch }): Promise<Secret>;
 }

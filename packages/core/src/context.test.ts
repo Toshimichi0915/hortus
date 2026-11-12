@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { test } from "node:test";
 import { tempDir } from "./testing.ts";
 import {
@@ -9,11 +8,9 @@ import {
   expandSkill,
   findSkills,
   loadAgentsMd,
-  parseFrontmatter,
   parseSkillMessage,
   projectDirs,
   projectRoot,
-  readSkill,
 } from "./context.ts";
 
 async function put(path: string, text: string) {
@@ -97,21 +94,4 @@ test("expandSkill drops the frontmatter and appends the request", async (t) => {
     request: "",
   });
   assert.equal(parseSkillMessage("hi <skill>"), undefined);
-});
-
-test("every Markdown file with frontmatter under examples/plugins parses, and every SKILL.md names and describes its skill", async () => {
-  const root = fileURLToPath(new URL("../../../examples/plugins/", import.meta.url));
-  const files = (await readdir(root, { recursive: true })).filter(
-    (f) => f.endsWith(".md") && !f.split(sep).some((p) => p === "node_modules" || p === "dist"),
-  );
-  assert.ok(files.length > 0);
-  for (const f of files) {
-    const text = await readFile(join(root, f), "utf8");
-    if (!text.startsWith("---")) continue;
-    // a formatter's blank line after the fence turns `key: value` lines into a heading
-    assert.doesNotMatch(text, /^---\r?\n\s*\r?\n/, `${f}: blank line after ---`);
-    const { meta } = parseFrontmatter(text);
-    assert.ok(Object.keys(meta).length > 0, `${f}: frontmatter didn't parse`);
-    if (f.endsWith("SKILL.md")) assert.ok(typeof meta.name === "string" && (await readSkill(join(root, f))), f);
-  }
 });
