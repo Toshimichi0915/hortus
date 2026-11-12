@@ -58,6 +58,12 @@ function entryRows(e: TextEntry, width: number): Row[] {
       col += w;
     });
   });
+  // a model's leading and trailing blank lines (thinking blocks end with "\n\n") would add to the gap between entries;
+  // user entries keep theirs: they pad its background
+  if (e.kind === "thinking" || e.kind === "assistant") {
+    while (rows.length > 1 && !rows.at(-1)?.text.trim()) rows.pop();
+    while (rows.length > 1 && !rows[0]?.text.trim()) rows.shift();
+  }
   cache.set(e, { text: e.text, width, version: themeVersion, rows });
   return rows;
 }

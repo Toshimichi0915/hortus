@@ -21,6 +21,20 @@ test("wrap keeps every character and respects width, including wide chars", () =
   assert.deepEqual(wrap("aaa bbb ccc", 7), ["aaa ", "bbb ccc"]);
 });
 
+test("an entry's leading and trailing blank lines take no rows: one gap between entries", () => {
+  const rows = toRows(
+    [
+      { id: 0, kind: "thinking", text: "hmm\n\n" },
+      { id: 1, kind: "assistant", text: "\n\nanswer" },
+    ],
+    20,
+  );
+  assert.deepEqual(
+    rows.map((r) => r.text),
+    ["hmm", "", "answer"],
+  );
+});
+
 test("selection joins soft-wrapped rows without newlines and real lines with them", () => {
   const rows = toRows([{ id: 0, kind: "user", text: "aaa bbb ccc\nsecond" }], 7);
   assert.deepEqual(
