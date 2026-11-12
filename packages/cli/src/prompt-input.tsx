@@ -8,10 +8,15 @@ import {
   useBoxMetrics,
   useCursor,
   useInput,
+  useStdin,
 } from "ink";
 import { useEffect, useRef, useState } from "react";
 import stringWidth from "string-width";
 import { wrap } from "./markdown.ts";
+import { theme } from "./themes.ts";
+
+// SGR mouse report: ESC [ < button ; x ; y (M = press/drag, m = release)
+const MOUSE = /\[<(\d+);(\d+);(\d+)([Mm])/g;
 
 /** `node`'s top-left on screen plus the visible row range of its clipping ancestors, undoing every `contentOffsetY`. */
 function screenBox(node: DOMElement) {
@@ -54,6 +59,21 @@ function layout(chars: string[], pos: number, width: number) {
   return { rows, caret: { row, col } };
 }
 
+/** The code-point index under visual row `row`, column `col` (clamped to the text). */
+export function posAt(chars: string[], pos: number, width: number, row: number, col: number) {
+  const { rows } = layout(chars, pos, width);
+  const r = rows[Math.max(0, Math.min(rows.length - 1, row))];
+  if (!r) return 0;
+  const max = r.last ? r.end : r.start + [...r.text].length;
+  let at = r.start;
+  while (at < max && stringWidth(chars.slice(r.start, at + 1).join("")) <= col) at++;
+  return at;
+}
+
+/** A drag's code points [from, to): both end cells included. */
+const span = ({ a, b }: { a: number; b: number }, length: number) =>
+  [Math.min(a, b), Math.min(length, Math.max(a, b) + 1)] as const;
+
 /** Where ↑ (`-1`) / ↓ (`1`) takes the caret: the closest column on the neighbouring visual row; undefined past either end. */
 export function moveRow(chars: string[], pos: number, width: number, dir: -1 | 1) {
   const { rows, caret } = layout(chars, pos, width);
@@ -70,7 +90,8 @@ export function moveRow(chars: string[], pos: number, width: number, dir: -1 | 1
  * ↑/↓ move between visual rows; `onCaretRow` reports the caret's row counted from the bottom, so a scroller can follow it.
  * `onKey` sees every key first; returning true keeps it from the input. `mask` draws each character as `*`. `onChange`
  * also gets the caret (a code-point index); a `caret` prop other than the one last reported moves it there (undefined:
- * a `value` the parent changed puts it at the end). */
+ * a `value` the parent changed puts it at the end). With `onCopy`, a mouse drag over it selects (copied on release) and a
+ * click moves the caret. */
 export function PromptInput({
   value,
   caret: wanted,
@@ -78,6 +99,7 @@ export function PromptInput({
   onSubmit,
   onKey,
   onCaretRow,
+  onCopy,
   mask,
 }: {
   value: string;
@@ -86,6 +108,7 @@ export function PromptInput({
   onSubmit: (value: string) => void;
   onKey?: (input: string, key: Key) => boolean;
   onCaretRow?: (fromBottom: number) => void;
+  onCopy?: (text: string) => void;
   mask?: boolean;
 }) {
   // cursor counts code points, so emoji move as one step
@@ -142,6 +165,10 @@ export function PromptInput({
     } else if (input && !key.ctrl && !key.meta) insert(input.replace(/\r\n?/g, "\n"));
   });
 
+  // a drag's [anchor, head] code points, kept with the value it was made on: an edit drops it
+  const [sel, setSel] = useState<{ value: string; a: number; b: number; dragged: boolean }>();
+  const [from, to] = sel?.value === value && sel.dragged ? span(sel, chars.length) : [0, 0];
+
   // the real terminal cursor sits on the caret, so the IME draws its preedit there; hidden when scrolled out of view.
   // only the box's screen position needs layout (from the last frame); the caret is placed from this render so it doesn't lag a frame
   const [box, setBox] = useState<ReturnType<typeof screenBox>>();
@@ -156,12 +183,65 @@ export function PromptInput({
     if (next.x !== box?.x || next.y !== box?.y || next.top !== box?.top || next.bottom !== box?.bottom) setBox(next);
   });
 
+  // Ink drops mouse reports before useInput, so read the raw chunks (as the transcript does)
+  const mouse = useRef({ box, width, sel, update, onCopy });
+  mouse.current = { box, width, sel, update, onCopy };
+  const { stdin } = useStdin();
+  const selectable = !!onCopy && !mask;
+  useEffect(() => {
+    if (!selectable) return;
+    const onData = (chunk: Buffer | string) => {
+      for (const [, b, x, y, kind] of String(chunk).matchAll(MOUSE)) {
+        const { box, width, sel, update, onCopy } = mouse.current;
+        if (!box) continue;
+        const { chars, pos } = latest.current;
+        const button = Number(b) & ~(4 | 8 | 16); // drop shift/alt/ctrl bits
+        const sy = Number(y) - 1;
+        const at = () =>
+          posAt(chars, pos, width, Math.max(box.top, Math.min(box.bottom - 1, sy)) - box.y, Number(x) - 1 - box.x);
+        const value = chars.join("");
+        // reports can come several to a chunk, faster than renders
+        const select = (next: typeof sel) => {
+          mouse.current.sel = next;
+          setSel(next);
+        };
+        if (button === 0 && kind === "M") {
+          const inside = sy >= box.top && sy < box.bottom && Number(x) - 1 >= box.x && Number(x) - 1 < box.x + width;
+          select(inside ? { value, a: at(), b: at(), dragged: false } : undefined);
+        } else if (button === 32 && kind === "M" && sel) select({ ...sel, b: at(), dragged: true });
+        else if (kind === "m" && sel) {
+          if (sel.dragged && sel.value === value) onCopy?.(chars.slice(...span(sel, chars.length)).join(""));
+          else {
+            select(undefined);
+            if (sel.value === value) update(chars, sel.a);
+          }
+        }
+      }
+    };
+    stdin.on("data", onData);
+    return () => {
+      stdin.off("data", onData);
+    };
+  }, [stdin, selectable]);
+
+  const hl = theme.selectedBg ? { backgroundColor: theme.selectedBg } : { inverse: true };
   return (
     <Box ref={ref} flexDirection="column" width="100%">
-      {rows.map(({ text }, i) => (
+      {rows.map(({ text, start }, i) => {
+        const cs = [...text];
+        const s = Math.max(0, Math.min(cs.length, from - start));
+        const e = Math.max(0, Math.min(cs.length, to - start));
         // biome-ignore lint/suspicious/noArrayIndexKey: rows have no identity beyond their position
-        <Text key={i}>{text || " "}</Text>
-      ))}
+        if (s >= e) return <Text key={i}>{text || " "}</Text>;
+        return (
+          // biome-ignore lint/suspicious/noArrayIndexKey: rows have no identity beyond their position
+          <Text key={i}>
+            {cs.slice(0, s).join("")}
+            <Text {...hl}>{cs.slice(s, e).join("")}</Text>
+            {cs.slice(e).join("")}
+          </Text>
+        );
+      })}
     </Box>
   );
 }

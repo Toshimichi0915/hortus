@@ -12,7 +12,7 @@ import { type CliPlugin, useUi } from "./api.ts";
 import { App } from "./app.tsx";
 import { cliPieces } from "./builtin/index.ts";
 import { createCli } from "./cli.ts";
-import { terminal } from "./testing.ts";
+import { renderApp, startCli, terminal } from "./testing.ts";
 import { dark } from "./themes.ts";
 import { type EntryRenderer, linesRenderer, type ToolRenderer } from "./tools.tsx";
 
@@ -713,4 +713,28 @@ test("cli:compaction: /compact draws the summary as one line, and a resumed sess
       .filter((k) => k !== "info"),
     ["builtin:compaction:summary", "assistant", "user", "assistant"],
   );
+});
+
+test("dragging over the prompt's text selects and copies it; a click moves the caret", async (t) => {
+  const restore = await tempHome();
+  const cli = await startCli();
+  const ui = renderApp(cli, { columns: 60, rows: 12 });
+  t.after(async () => {
+    ui.app.unmount();
+    await cli.close();
+    await restore();
+  });
+  cli.setInput("hello world");
+  await until(() => /hello world/.test(ui.screen()));
+  const y = ui.frame().findIndex((l) => l.includes("hello world")) + 1;
+  const x = (ui.frame()[y - 1] ?? "").indexOf("hello") + 1;
+  // over "world": from its first cell to its last
+  ui.keys(`\x1b[<0;${x + 6};${y}M\x1b[<32;${x + 10};${y}M\x1b[<0;${x + 10};${y}m`);
+  const copy = `\x1b]52;c;${Buffer.from("world").toString("base64")}\x07`;
+  await until(() => ui.writes.some((w) => w.includes(copy)));
+  // a click between "hello" and " world", then typing there
+  ui.keys(`\x1b[<0;${x + 5};${y}M\x1b[<0;${x + 5};${y}m`);
+  await until(() => cli.ui.getState().caret === 5);
+  ui.keys(",");
+  await until(() => cli.ui.getState().input === "hello, world");
 });

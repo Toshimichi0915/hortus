@@ -487,6 +487,7 @@ function InputBox({ prefix }: { prefix?: ReactNode }) {
             onChange={(value, caret) => cli.setInput(value, { caret })}
             onSubmit={submit}
             onKey={onKey}
+            onCopy={cli.copy}
             // scroll just enough to keep the caret's row in view
             onCaretRow={(row) => setInScroll((n) => Math.min(row, Math.max(n, row - INPUT_ROWS + 1)))}
           />
