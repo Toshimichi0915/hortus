@@ -635,7 +635,7 @@ export async function createCli(session: Session, makeAgent: (opts: LoadOptions)
     /**
      * exit: `agent.close` (aborts the running turn, whose completed messages are saved already, then `session_close` and
      * `close` (builtin:mcp stops its servers there), within its timeout); the caller should then exit the process, as a tool may ignore
-     * its `ctx.signal`; also waits for config.json saves (`/theme`, `/effort`) still queued
+     * its `ctx.signal`; also waits for config.json saves (`/theme`, `/effort`, `/model`) still queued
      */
     close: async () => {
       await agent.close();
@@ -643,6 +643,11 @@ export async function createCli(session: Session, makeAgent: (opts: LoadOptions)
     },
     /** sets the effort of the next runs (undefined = provider default) and saves it to config.json */
     setEffort,
+    /** sets the shown session's model and saves it to config.json (the next sessions' default) */
+    setModel: async (model: string, provider: string) => {
+      save({ provider, model }, "model");
+      await ui.getState().session.setModel(model, provider);
+    },
     /** next effort the model takes after the set one: default, then EFFORTS in order, then default again */
     cycleEffort: () => {
       const s = ui.getState();

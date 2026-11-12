@@ -10,6 +10,7 @@ import {
   createAgent,
   type LoadOptions,
   listSessions,
+  loadConfig,
   type Named,
   openSession,
   type Session,
@@ -74,6 +75,7 @@ function fakeAgent(o: LoadOptions, fields: { plugins?: Named[]; ctx?: unknown } 
       return true;
     },
     session: () => current,
+    close: async () => {},
     run: async (input?: string) => {
       if (input === undefined || !current) return undefined;
       const [m] = await current.append([{ role: "user", content: input }]);
@@ -114,7 +116,8 @@ test("parseCommand splits one line into a name and, once a space follows it, an 
   assert.equal(parseCommand("/etc/hosts is odd"), null);
 });
 
-test("/model sets the session's provider and model, which status follows; a rejected one changes nothing", async (t) => {
+test("/model sets the session's provider and model, which status follows, and config.json's; a rejected one changes nothing", async (t) => {
+  t.after(await tempHome());
   const session = await openSession(null, await tempDir(t, "hortus-"));
   const cli = await createCli(session, async (o) => fakeAgent(o));
   await until(() => cli.ui.getState().status?.model === "m0");
@@ -141,6 +144,10 @@ test("/model sets the session's provider and model, which status follows; a reje
   assert.equal(await send(cli, "/model nokey/m"), "error: No API key for nokey. Add it to ~/.hortus/secrets.json");
   assert.equal(await send(cli, "/model foo"), "error: Usage: /model <provider>/<model>");
   assert.deepEqual(settings(), state);
+  // the last one set is the next sessions' default
+  await cli.close();
+  const { provider, model } = await loadConfig();
+  assert.deepEqual({ provider, model }, state);
 });
 
 test("/model offers every provider's models, listed afresh each time", async () => {

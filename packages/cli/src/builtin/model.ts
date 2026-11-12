@@ -1,5 +1,5 @@
 import type { Ctx } from "@hortus/core";
-import { type CliPiece, version } from "../api.ts";
+import { type Cli, type CliPiece, version } from "../api.ts";
 
 /** The ctx's session (the TUI's shown one; a headless host's current one). */
 export function sessionOf(ctx: Ctx) {
@@ -37,7 +37,10 @@ export default {
           const session = sessionOf(ctx);
           // throws for a provider missing from secrets.json or of an unknown type
           await ctx.resolve({ provider, model });
-          await session.setModel(model, provider);
+          // the TUI's also becomes the next sessions' default; elsewhere, the session's own
+          const cli = (ctx.host as { cli?: Cli }).cli;
+          if (cli && cli.ui.getState().session === session) await cli.setModel(model, provider);
+          else await session.setModel(model, provider);
           return `Model set to ${provider}/${model}`;
         },
       },

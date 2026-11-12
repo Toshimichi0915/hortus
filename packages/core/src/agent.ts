@@ -282,6 +282,8 @@ export async function createAgent(opts: LoadOptions = {}) {
   });
   /** Provider name, model and provider instance a run with `opts` (and `kit`'s providers) would use; throws if any is missing. */
   async function resolve(opts: Pick<RunOptions, "model" | "provider"> = {}, kit = base) {
+    // read per run, like secrets, so a default `/model` saved mid-session applies to the next new session
+    const config = await loadConfig();
     const name = opts.provider ?? config.provider;
     if (!name) throw new Error("No provider selected. Set 'provider' in ~/.hortus/config.json or use /model");
     // read per run so a key set mid-session (or a refreshed token) applies
