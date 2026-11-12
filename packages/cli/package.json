@@ -41,5 +41,8 @@
   },
   "bin": {
     "hortus": "dist/index.js"
+  },
+  "scripts": {
+    "prepack": "tsc -b"
   }
 }
