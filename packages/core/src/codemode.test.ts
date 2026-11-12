@@ -106,7 +106,12 @@ test("codemode scripts call tools through ctx.runTool: values, images, errors an
   assert.equal(failed.isError, true);
   assert.match(failed.output, /before\nScript error: boom/);
   assert.match((await run("await tools.add({a: 'x'});")).output, /Script error: Invalid input/);
-  assert.match((await run("await new Promise(() => {});", 0.05)).output, /timed out/);
+  // a call left running when the script ends settles into nothing
+  assert.equal((await run("tools.add({a: 1, b: 2}); return 1;")).output, "1");
+  // nothing left to settle it: fails at once; a busy loop meets the deadline
+  assert.match((await run("await new Promise(() => {});")).output, /never settle/);
+  assert.match((await run("while (true) {}", 0.05)).output, /Script error: Script timed out after 0.05 seconds/);
+  assert.match((await run("await tools.add({a: 1, b: 2}); for (;;) {}", 0.05)).output, /timed out/);
   // a tool's image is a block the script attaches; it was saved once, its text names the file
   const r = await run("image(await tools.shot());");
   const path = r.images?.[0]?.path;
@@ -208,4 +213,21 @@ test("with codemode removed in run_start, codemode-only tools are declared direc
   const names = requests[0]?.tools.map((t) => t.name) ?? [];
   assert.ok(names.includes("hidden"));
   assert.ok(!names.includes("codemode"));
+});
+
+test("codemode scripts run in a QuickJS isolate: no host globals, even through constructors", async (t) => {
+  const { run } = await setup(t);
+  assert.equal(
+    (
+      await run(
+        "return [typeof process, typeof require, typeof setTimeout, typeof fetch, console.log.constructor('return typeof process')(), await tools.add.constructor('return typeof globalThis.process')()].join(',');",
+      )
+    ).output,
+    "undefined,undefined,undefined,undefined,undefined,undefined",
+  );
+  // memory is capped
+  assert.match(
+    (await run("const a = []; for (;;) a.push(new Array(1e6).fill(1));", 30)).output,
+    /Script error: .*memory/,
+  );
 });

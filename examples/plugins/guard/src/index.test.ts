@@ -38,7 +38,7 @@ test("guard blocks rm -rf / in bash with a reason the model sees, and lets ls th
   assert.doesNotMatch(results[4]?.output ?? "", /Blocked/);
 });
 
-test("guard asks before codemode runs (node:vm is no sandbox), then blocks the same calls its script makes", async (t) => {
+test("codemode runs unasked (QuickJS has no way out), and guard blocks the calls its script makes", async (t) => {
   t.after(await tempHome({ plugins: { guard: fileURLToPath(new URL("..", import.meta.url)) } }));
   // a codemode-only tool (as MCP's are), so codemode is declared
   const lookup = tool({
@@ -67,16 +67,14 @@ test("guard asks before codemode runs (node:vm is no sandbox), then blocks the s
     const last = provider.requests[1]?.messages.at(-1);
     return { result: last?.role === "tool" ? last.results[0] : undefined, asks };
   };
-  // the escape a script can make: unapproved, it never runs (a harmless recorder: an env var in this process)
-  const breakout = `console.log.constructor("return process")().env.HORTUS_GUARD_PROBE = "ran";`;
-  const unasked = await run(breakout);
-  assert.deepEqual(unasked.asks, ["Allow codemode to run code? It can do anything."]);
-  assert.equal(unasked.result?.output, "Blocked by guard: no one approved the code");
+  // node:vm's old escape finds no process in the isolate (a harmless recorder: an env var in this process)
+  const breakout = await run(`console.log.constructor("return process")().env.HORTUS_GUARD_PROBE = "ran";`);
+  assert.deepEqual(breakout.asks, []);
+  assert.match(breakout.result?.output ?? "", /Script error: .process. is not defined/);
   assert.equal(process.env.HORTUS_GUARD_PROBE, undefined);
-  assert.equal((await run(breakout, "Deny")).result?.output, "Blocked by guard: the user denied the code");
-  assert.equal(process.env.HORTUS_GUARD_PROBE, undefined);
-  // approved, its tools.* calls still pass the gate
-  const { result } = await run("await tools.bash({ command: 'rm -rf /' });", "Allow");
+  // its tools.* calls pass the gate
+  const { result, asks } = await run("await tools.bash({ command: 'rm -rf /' });");
+  assert.deepEqual(asks, []);
   assert.equal(result?.isError, true);
   assert.match(result?.output ?? "", /Script error: Blocked by guard: it would delete/);
 });

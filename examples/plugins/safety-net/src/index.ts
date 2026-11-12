@@ -181,8 +181,8 @@ const DEFAULT_REQUEST = "Help me with CC Safety Net.";
 
 /**
  * cc-safety-net: every tool call passes a command analyzer before it runs (`tool_gate`, which also sees codemode
- * scripts' calls, nested `ctx.runTool` calls and subruns'). A tool running code (`effects.code`: codemode, whose
- * `node:vm` is no sandbox) asks the user first, blocked when no one can answer. A denial becomes the call's error result, in the original's
+ * scripts' calls, nested `ctx.runTool` calls and subruns'). A tool running code (`effects.code`: e.g. fabric_exec,
+ * whose `node:vm` is no sandbox; builtin codemode runs in QuickJS and needs none) asks the user first, blocked when no one can answer. A denial becomes the call's error result, in the original's
  * format, and a line in the audit log. `tool_gate` runs after every `tool_call` handler, which may rewrite the input
  * (rtk-optimizer does), on the frozen input that runs, and its block wins over a result a `tool_call` handler supplied.
  * `"required": true` keeps it in every subrun whatever its plugin filter (and under `--only`).
@@ -193,7 +193,7 @@ export default {
       if (p.block !== undefined) return;
       const policy = await policyFor(ctx.cwd);
       let hit = check(p.call, policy, ctx.cwd, p.tool?.effects);
-      // code (`effects.code`: a codemode script, node:vm being no sandbox) can do anything this analyzer can't see:
+      // code (`effects.code`, e.g. a node:vm program) can do anything this analyzer can't see:
       // the user decides, and with no one to ask it is blocked
       if (!hit && p.tool?.effects?.code?.length) {
         const answer = await ctx.ask({

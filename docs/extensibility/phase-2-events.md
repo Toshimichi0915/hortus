@@ -294,7 +294,11 @@ C10, C12, I4) needed these; their workarounds are gone.
    such a call ("Allow <tool> to run code?"), safety-net asks too (rule `analysis.unconfined-code` when denied or no
    one can answer), permission-system keeps asking (a tool without exec/path keys), Fabric rates it `execute`. A new
    key instead of `exec` (the review's suggestion): gates parse `exec` values as shell commands, which code isn't.
-   No isolate dependency was added; the real fix (QuickJS-wasm or `isolated-vm`) is in the README's "Possible later".
+   **Later:** builtin codemode now runs scripts in QuickJS (`quickjs-emscripten-core` with its release-sync wasm build;
+   no Node APIs, file system, network or timers; 256 MB; a hard deadline, busy loops included; a script awaiting
+   something nothing can settle fails at once), so its only way out is the gated `tools.*` calls and it no longer
+   declares `effects.code`: guard and safety-net don't ask about it. Fabric, workflows and pi-subagents still use
+   `node:vm` and keep the effect.
 2. `tool_gate`'s `tool` is the tool the frozen call names (a `tool_call` handler may rename it), not the original's.
 3. A plugin replacing a `required` one is `required` itself (along a replacer chain).
 4. Example tools declare effects: hashline-edit `replace`/`insert` (`reads`/`writes: ["path"]`), background-tasks
@@ -380,8 +384,9 @@ C10, C12, I4) needed these; their workarounds are gone.
   harmless `shred --version` probe behind a recorder: rewritten into it, and supplied as a cached result).
 - [x] **T** (final 2) `tool_call.env` reaches `tool_gate` frozen and the tool's `ctx.env`.
 - [x] **T** (final 3) the built-in tools' `effects`; guard, safety-net, permission-system and fabric pass with them.
-- [x] **T** (final review) codemode declares `effects.code`; guard and safety-net ask before it and block it when no one
-  approves, so a script's `node:vm` escape (a harmless env-var recorder) never runs; `tool_gate`'s `tool` follows a
+- [x] **T** (final review, then QuickJS) codemode scripts find no `process`, `require`, timers or `fetch`, even through
+  a host function's constructor (`codemode.test.ts`), so the old `node:vm` escape (a harmless env-var recorder, in the
+  guard and safety-net tests) never runs; memory and busy loops are capped; fabric's `effects.code` is still asked about; `tool_gate`'s `tool` follows a
   renamed call; a replacer of a required plugin is required; `disabledPlugins` takes `prefix*`.
 - [x] **T** (final 4) a `"*"` provider wrap reads the state its plugin's handlers set; billion-context routes without
   its header.

@@ -590,8 +590,9 @@ export interface ToolEffects {
   /** keys holding shell commands it runs */
   exec?: string[];
   /**
-   * keys holding source code it runs with the agent's own powers (a script in any language, codemode's `node:vm` ones
-   * included: `node:vm` is not a sandbox): gates treat it as running anything (ask, else block)
+   * keys holding source code it runs with the agent's own powers (a script in any language, or JS in `node:vm`, which
+   * is no sandbox; builtin codemode's QuickJS scripts reach out only through gated `tools.*` calls, so it has none):
+   * gates treat it as running anything (ask, else block)
    */
   code?: string[];
   /** it changes nothing (an MCP tool's `readOnlyHint`) */

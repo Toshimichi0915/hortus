@@ -122,26 +122,16 @@ return out.join("\\n=====\\n");`;
     [{ toolCalls: [{ id: "1", name: "codemode", input: { code } }] }, { text: "done" }],
     [lookup],
   );
-  // codemode itself runs code (node:vm is no sandbox): approved here, else blocked (see below)
-  const asks: string[] = [];
-  const approve: Plugin = {
-    on: {
-      ask: (p) => {
-        asks.push(p.question);
-        p.resolve("Allow");
-      },
-    },
-  };
-  const agent = await createAgent({ extra: [...extra, { name: "approve", plugin: approve }] });
+  // codemode itself runs in QuickJS, whose only way out is these calls: it isn't asked about
+  const agent = await createAgent({ extra });
   await agent.run("tidy", { cwd });
-  assert.deepEqual(asks, ["CC Safety Net can't analyze code: allow codemode to run it? It can do anything."]);
   const out = (resultsOf(provider, 1)[0]?.output ?? "").split("\n=====\n");
   assert.deepEqual(out.map(ruleOf), ["git.clean-force", "rm.recursive-force-outside-cwd", undefined, "shred.target"]);
   assert.equal(out[2], "ran");
   assert.deepEqual(ran, ["echo fine"]);
 });
 
-test("a codemode script nobody approved is blocked: its escape from node:vm never runs", async (t) => {
+test("a codemode script can't escape its QuickJS isolate", async (t) => {
   t.after(await tempHome({ plugins: { "safety-net": pluginDir } }));
   const cwd = await tempDir(t, "safety-net-");
   // a harmless recorder: an env var in this process
@@ -161,8 +151,7 @@ test("a codemode script nobody approved is blocked: its escape from node:vm neve
   await agent.run("go", { cwd });
   const [r] = resultsOf(provider, 1);
   assert.equal(r?.isError, true);
-  assert.equal(ruleOf(r?.output), "analysis.unconfined-code");
-  assert.match(r?.output ?? "", /no one approved it/);
+  assert.match(r?.output ?? "", /^Script error: /);
   assert.equal(process.env.HORTUS_SAFETY_NET_PROBE, undefined);
 });
 

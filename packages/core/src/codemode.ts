@@ -1,4 +1,9 @@
-import vm from "node:vm";
+import {
+  newQuickJSWASMModuleFromVariant,
+  type QuickJSDeferredPromise,
+  type QuickJSHandle,
+  type QuickJSWASMModule,
+} from "quickjs-emscripten-core";
 import * as z from "zod";
 import { type Image, type Tool, type ToolCtx, tool, toolSchema } from "./llm.ts";
 import { saveImage } from "./tools.ts";
@@ -69,8 +74,6 @@ export function declare(tools: Tool[]): string {
   return `declare const tools: {\n${methods.join("\n")}\n};`;
 }
 
-const show = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v, null, 2));
-
 /**
  * `codemode`'s `details` (every `ctx.update`, and so the result's), for card renderers: the tool calls its script made,
  * in order, each running until it settles.
@@ -79,9 +82,34 @@ export interface CodemodeDetails {
   calls: { tool: string; input: unknown; status: "running" | "done" | "error" }[];
 }
 
+/** The QuickJS engine (WebAssembly), loaded once per process on the first script. */
+let engine: Promise<QuickJSWASMModule> | undefined;
+const quickjs = () => {
+  engine ??= newQuickJSWASMModuleFromVariant(import("@jitl/quickjs-wasmfile-release-sync"));
+  return engine;
+};
+
+/** A script's memory limit (Pi's too). */
+const MEMORY = 256 * 1024 * 1024;
+
+/** The script's globals, written in the script's own JS over the host bridge (`__call`, `__text`, ...): only strings cross. */
+const PRELUDE = `
+const __show = (v) => (typeof v === "string" ? v : JSON.stringify(v, null, 2));
+globalThis.tools = Object.fromEntries(__names.split("\\n").filter(Boolean).map((n) => [n, async (input = {}) => {
+  const r = JSON.parse(await __call(n, JSON.stringify(input)));
+  return r.v;
+}]));
+globalThis.text = (v) => void __text(__show(v));
+globalThis.image = (v) => void __image(JSON.stringify(v ?? null));
+const __log = (...args) => void __log1(args.map(__show).join(" "));
+globalThis.console = { log: __log, info: __log, warn: __log, error: __log, debug: __log };
+`;
+
 /**
- * Runs `code` as an async function body with `tools` (each call through `ctx.runTool`, so gated like a model's, as a
- * child of the codemode call), `text`, `image` and `console`; returns what the script showed.
+ * Runs `code` as an async function body in a QuickJS (WebAssembly) isolate whose only way out is `tools` (each call
+ * through `ctx.runTool`, so gated like a model's, as a child of the codemode call), plus `text`, `image` and `console`;
+ * returns what the script showed. No Node APIs, file system, network or timers; 256 MB of memory; `timeout` is a hard
+ * deadline, busy loops included.
  */
 export async function runScript(tools: Tool[], code: string, timeout: number, ctx: ToolCtx): Promise<string | Image[]> {
   const items: string[] = [];
@@ -89,68 +117,149 @@ export async function runScript(tools: Tool[], code: string, timeout: number, ct
   const attached: Image[] = [];
   const calls: CodemodeDetails["calls"] = [];
   const report = () => ctx.update({ calls: calls.map((c) => ({ ...c })) } satisfies CodemodeDetails);
-  // a timeout or error ends the script's calls still running too
+  const byIdent = new Map(tools.map((t) => [ident(t.name), t]));
+  // a timeout, error or abort ends the script's calls still running too
   const stop = new AbortController();
-  const api = Object.fromEntries(
-    tools.map((t) => [
-      ident(t.name),
-      async (input: unknown = {}) => {
-        const call: CodemodeDetails["calls"][number] = { tool: t.name, input, status: "running" };
-        calls.push(call);
-        report();
-        // core gives it the id `<codemode call>/<n>`
-        const r = await ctx.runTool({ id: "", name: t.name, input }, { signal: stop.signal });
-        call.status = r.isError ? "error" : "done";
-        report();
-        if (r.isError) throw new Error(r.output);
+  const deadline = Date.now() + timeout * 1000;
+  const runtime = (await quickjs()).newRuntime();
+  runtime.setMemoryLimit(MEMORY);
+  runtime.setInterruptHandler(() => Date.now() > deadline || stop.signal.aborted);
+  const vm = runtime.newContext();
+  /** host calls not settled yet; while any is, the script may still finish */
+  const pending = new Set<QuickJSDeferredPromise>();
+  let finish!: (value: string | undefined) => void;
+  let fail!: (e: Error) => void;
+  const result = new Promise<string | undefined>((resolve, reject) => {
+    finish = resolve;
+    fail = reject;
+  });
+  let over = false;
+  const end = (e?: Error, value?: string) => {
+    if (over) return;
+    over = true;
+    if (e) fail(e);
+    else finish(value);
+  };
+  /** runs the script's ready jobs; then, with nothing running in it or for it, it can never finish */
+  const pump = () => {
+    if (over) return;
+    const r = runtime.executePendingJobs();
+    if (r.error) {
+      const e = vm.dump(r.error);
+      r.error.dispose();
+      return end(new Error(Date.now() > deadline ? "interrupted" : errorText(e)));
+    }
+    if (!over && !pending.size) end(new Error("The script awaits a promise that can never settle"));
+  };
+  const fn = (name: string, f: (...args: (string | undefined)[]) => string | QuickJSHandle | undefined) => {
+    const h = vm.newFunction(name, (...args) => {
+      const r = f(...args.map((a) => vm.dump(a) as string | undefined));
+      return typeof r === "string" ? vm.newString(r) : r;
+    });
+    vm.setProp(vm.global, name, h);
+    h.dispose();
+  };
+  fn("__call", (name, json) => {
+    const t = byIdent.get(name ?? "");
+    const input = JSON.parse(json ?? "null") as unknown;
+    const deferred = vm.newPromise();
+    pending.add(deferred);
+    const call: CodemodeDetails["calls"][number] = { tool: t?.name ?? String(name), input, status: "running" };
+    calls.push(call);
+    report();
+    // core gives it the id `<codemode call>/<n>`
+    const settle = ctx
+      .runTool({ id: "", name: t?.name ?? String(name), input }, { signal: stop.signal })
+      .catch((e: unknown) => ({ id: "", output: e instanceof Error ? e.message : String(e), isError: true as const }));
+    void settle.then((r) => {
+      call.status = r.isError ? "error" : "done";
+      report();
+      pending.delete(deferred);
+      // the script ended: its runtime (and this promise) is gone
+      if (over) return;
+      if (r.isError) {
+        const err = vm.newError(r.output);
+        deferred.reject(err);
+        err.dispose();
+      } else {
         // images as blocks (`image()` attaches them), the output (their text) on the first; else the value, else text
         const [first, ...rest] = r.images ?? [];
-        if (first) return rest.length ? [{ ...first, text: r.output }, ...rest] : { ...first, text: r.output };
-        return "value" in r ? r.value : r.output;
-      },
-    ]),
-  );
-  const log = (...args: unknown[]) => void logs.push(args.map(show).join(" "));
-  const context = vm.createContext({
-    tools: api,
-    text: (v: unknown) => void items.push(show(v)),
-    image: (v: Image) => {
-      if (v?.type !== "image" || typeof v.data !== "string") throw new Error("image() takes an image a tool returned");
-      const { text: shown, ...img } = v;
-      // a tool's result images are saved already, and their text names the file
-      const path = img.path ?? saveImage(img);
-      attached.push({ ...img, path });
-      if (shown) items.push(shown);
-      if (!img.path) items.push(`[Image saved to ${path}]`);
-    },
-    console: { log, info: log, warn: log, error: log, debug: log },
+        const v = first
+          ? rest.length
+            ? [{ ...first, text: r.output }, ...rest]
+            : { ...first, text: r.output }
+          : "value" in r
+            ? r.value
+            : r.output;
+        const s = vm.newString(JSON.stringify({ v }));
+        deferred.resolve(s);
+        s.dispose();
+      }
+      deferred.dispose();
+      pump();
+    });
+    return deferred.handle;
   });
+  fn("__text", (v) => void items.push(v ?? ""));
+  fn("__log1", (v) => void logs.push(v ?? ""));
+  fn("__image", (json) => {
+    const v = JSON.parse(json ?? "null") as Image | null;
+    if (v?.type !== "image" || typeof v.data !== "string") throw new Error("image() takes an image a tool returned");
+    const { text: shown, ...img } = v;
+    // a tool's result images are saved already, and their text names the file
+    const path = img.path ?? saveImage(img);
+    attached.push({ ...img, path });
+    if (shown) items.push(shown);
+    if (!img.path) items.push(`[Image saved to ${path}]`);
+  });
+  fn("__done", (v) => void end(undefined, v));
+  fn("__fail", (m) => void end(new Error(m ?? "Error")));
+  const names = vm.newString([...byIdent.keys()].join("\n"));
+  vm.setProp(vm.global, "__names", names);
+  names.dispose();
+
   const output = () =>
     [...items, ...(logs.length ? [`<console_output>\n${logs.join("\n")}\n</console_output>`] : [])].join("\n");
-  let timer: NodeJS.Timeout | undefined;
+  const onAbort = () => end(new Error("Aborted"));
+  ctx.signal?.addEventListener("abort", onAbort, { once: true });
+  // the deadline also covers waits on tools (the interrupt handler only runs while the script computes)
+  const timer = setTimeout(() => end(new Error(`Script timed out after ${timeout} seconds`)), timeout * 1000);
   try {
-    // ponytail: node:vm is not a sandbox: a script reaches `process` (`console.log.constructor("return process")()`)
-    // and so anything, unseen by gates, which is why the tool declares `effects.code` (gates ask before it runs, or
-    // block). Its timeout only covers synchronous code; a busy loop after an await hangs the run. Upgrade path: run
-    // scripts in a real isolate (QuickJS-wasm, or isolated-vm) with `tools` as the only bridge, then drop the effect.
-    const script = vm.runInContext(`(async () => {\n${code}\n})()`, context, { timeout: timeout * 1000 });
-    const value = await Promise.race([
-      script,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`Script timed out after ${timeout} seconds`)), timeout * 1000);
-      }),
-    ]);
-    if (value !== undefined) items.push(show(value));
+    const started = vm.evalCode(
+      `${PRELUDE}\n(async () => {\n${code}\n})().then((v) => __done(v === undefined ? undefined : __show(v)), (e) => __fail(e instanceof Error ? e.message : String(e)));`,
+      "script.js",
+    );
+    if (started.error) {
+      const e = vm.dump(started.error);
+      started.error.dispose();
+      end(new Error(Date.now() > deadline ? `Script timed out after ${timeout} seconds` : errorText(e)));
+    } else {
+      started.value.dispose();
+      pump();
+    }
+    const value = await result;
+    if (value !== undefined) items.push(value);
   } catch (e) {
-    throw new Error(`${output()}\nScript error: ${e instanceof Error ? e.message : String(e)}`.trim());
+    let message = e instanceof Error ? e.message : String(e);
+    if (message === "interrupted") message = `Script timed out after ${timeout} seconds`;
+    throw new Error(`${output()}\nScript error: ${message}`.trim());
   } finally {
     clearTimeout(timer);
+    ctx.signal?.removeEventListener("abort", onAbort);
+    over = true;
     stop.abort(new Error("The script ended"));
+    for (const d of pending) d.dispose();
+    vm.dispose();
+    runtime.dispose();
   }
   const text = output() || "(no output)";
   // the text rides on the first image
   return attached.length ? attached.map((a, i) => (i ? a : { ...a, text })) : text;
 }
+
+/** A QuickJS error dumped to the host: its message. */
+const errorText = (e: unknown) =>
+  e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : String(e);
 
 /** The `codemode` tool's description, declaring `tools`. */
 export const codemodeDescription = (tools: Tool[]) =>
@@ -174,8 +283,7 @@ export const codemodeTool = tool({
   name: "codemode",
   description: codemodeDescription([]),
   codemodeHost: true,
-  // node:vm is no sandbox: a script can do anything, so gates treat the call as running arbitrary code
-  effects: { code: ["code"] },
+  // scripts run in a QuickJS isolate whose only way out is `tools`, each call gated: the script itself needs no gate
   inputSchema: z.object({
     code: z.string().describe("JavaScript source: the body of an async function"),
     timeout: z.number().positive().optional().describe("Timeout in seconds (default: 120)"),

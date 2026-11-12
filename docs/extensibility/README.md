@@ -40,10 +40,9 @@ Revisit only with a concrete package that needs it (see the "Not ported" column 
 - Inline terminal images (Ink's layout can't measure kitty/iTerm escapes).
 
 Possible later (found by the phase 4 and 5 ports; each has a workaround today):
-- A real isolate for codemode scripts (QuickJS-wasm or `isolated-vm`, with `tools` as the only bridge): `node:vm` is
-  not a sandbox (a script reaches `process` through any host function's constructor), so `codemode` (and Fabric's
-  `fabric_exec`) declare `effects.code` and gates treat a call as running anything (guard and safety-net ask, else
-  block). With an isolate, only the scripts' `tools.*` calls would need gating, and the effect could go.
+- A real isolate for the example plugins' script runners (Fabric's `fabric_exec`, workflows, pi-subagents still use
+  `node:vm`, which is no sandbox, so they declare `effects.code`): builtin codemode's QuickJS runner (`runScript`)
+  shows the way. (Builtin codemode itself moved to QuickJS after the build: see phase 2's final-review fix 1.)
 - `ModelInfo.subscription` (whether a model is billed by subscription, so a footer shows no cost): `powerline` shows
   the cost when a provider reports it.
 - Message timestamps: messages carry none (session entries are ordered, not dated); a plugin wanting them keeps its own
@@ -104,7 +103,7 @@ A phase is done when every box is ticked, `pnpm test` and `pnpm lint` pass, and 
 | -------------- | -------------------------------------------------------------------------------------------------------------------------- | ------- |
 | `oauth-wrap`   | wraps `anthropic` via `wrap(Default)`, injects a header through `fetch`, refreshes a token stored in a loose secrets field | 1       |
 | `restyle-read` | wraps the `read` tool (adds `details`) and its renderer                                                                    | 1       |
-| `guard`        | blocks `rm -rf` in `tool_gate` by tool `effects` (bash's, codemode scripts' calls too), asks before writes (`write`/`edit`) and before code runs (`effects.code`: codemode) | 2, 4, 5 |
+| `guard`        | blocks `rm -rf` in `tool_gate` by tool `effects` (bash's, codemode scripts' calls too), asks before writes (`write`/`edit`) and before code runs (`effects.code`: e.g. `fabric_exec`) | 2, 4, 5 |
 | `tracer`       | builds a span tree from `run_*`/`request`/`response`/`tool_*` ids and parents; flushes in `close`                          | 2, 6    |
 | `plan-mode`    | `/plan` removes `write`/`edit`/`bash` in `run_start`, swaps model/effort, persists its mode as an entry                    | 2, 3    |
 | `todo`         | `todo` tool writing entries; state rebuilt on replay/branch; panel in the `aboveInput` slot                                | 3, 4    |

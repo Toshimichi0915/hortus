@@ -16,10 +16,11 @@ const strings = (v: unknown) => (Array.isArray(v) ? v : [v]).filter((x): x is st
 /**
  * Blocks dangerous shell commands in `tool_gate`, after every `tool_call` handler (so it judges the input that runs),
  * before they run: the call gets an error result with the reason, so the model can try something else. Asks before
- * every file write and every code run (`effects.code`: a codemode script, which can do anything since `node:vm` is not
- * a sandbox; only its `tools.*` calls pass this gate on their own) (`ctx.ask`): anything but "Allow" (a denial, a
+ * every file write and every code run (`effects.code`: a tool running code with the agent's powers, e.g. fabric_exec's
+ * `node:vm` programs, which can do anything unseen by this gate; builtin codemode's QuickJS scripts don't count: only
+ * their `tools.*` calls reach out, and those pass this gate) (`ctx.ask`): anything but "Allow" (a denial, a
  * dismissed dialog, or no one to ask) blocks it. Which input is a command, a written path or code comes from the
- * tool's `effects` (builtin `bash`/`write`/`edit`/`codemode` declare them).
+ * tool's `effects` (builtin `bash`/`write`/`edit` declare them).
  * Calls a tool makes through `ctx.runTool` pass the same gate, codemode scripts' included; `"required": true` in
  * hortus.json keeps it in every subrun, whatever its plugin filter.
  */
@@ -36,7 +37,7 @@ export default {
           return;
         }
       }
-      // code (a codemode script: node:vm is no sandbox) can do anything unseen by this gate: ask, like a write
+      // code (`effects.code`, e.g. a node:vm program) can do anything unseen by this gate: ask, like a write
       const writes = (effects?.writes ?? []).flatMap((k) => strings(input[k]));
       const [question, noun] = effects?.code?.length
         ? [`Allow ${p.call.name} to run code? It can do anything.`, "the code"]

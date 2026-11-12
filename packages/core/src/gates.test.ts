@@ -344,7 +344,8 @@ test("builtin tools declare their effects", () => {
       { writes: ["path"] },
       { reads: ["path"], writes: ["path"] },
       { exec: ["command"] },
-      { code: ["code"] },
+      // QuickJS: only its tools.* calls reach out, each gated
+      undefined,
     ],
   );
 });
