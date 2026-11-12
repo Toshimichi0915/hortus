@@ -391,7 +391,7 @@ export function Transcript({
   onScroller?: (scroll: ((to: number | "top" | "bottom") => void) | undefined) => void;
 }) {
   const pane = useRef<DOMElement>(null);
-  const { width, height } = useBoxMetrics(pane);
+  const { width, height, hasMeasured } = useBoxMetrics(pane);
   const renderers = useMemo(() => ({ tools, texts, expanded }), [tools, texts, expanded]);
   const key = textKey(width, renderers);
 
@@ -410,7 +410,8 @@ export function Transcript({
   const { rows, segments } = useMemo(
     () =>
       layout(
-        entries,
+        // the pane is 0 wide until Ink first lays it out: wrapping at 1 column then costs line length² per line
+        hasMeasured ? entries : [],
         width,
         (e) => {
           const m = measured.current.get(e.id);
@@ -418,7 +419,7 @@ export function Transcript({
         },
         isBlock,
       ),
-    [entries, width, version, key, isBlock, theme],
+    [entries, width, version, key, isBlock, theme, hasMeasured],
   );
 
   const maxTop = Math.max(0, rows.length - height);
