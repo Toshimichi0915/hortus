@@ -1,31 +1,7 @@
-import { dirname } from "node:path";
-import { EFFORTS, type Effort, expandSkill, listSessions, openSession, type Skill } from "@hortus/core";
-import { type Cli, supports } from "./cli.ts";
-import { stamp } from "./entry.ts";
+import { type AgentCommand, expandSkill, type Skill } from "@hortus/core";
+import type { Cli } from "./cli.ts";
 
-/** One choice for a command's argument. */
-export interface Candidate {
-  /** the argument once chosen; the typed argument is matched against it and the label */
-  value: string;
-  /** shown in the menu instead of `value` */
-  label?: string;
-  /** dim text after the label */
-  description?: string;
-}
-
-/** A `/name arg` command. The built-in ones use nothing a plugin's `cli.commands` can't. */
-export interface Command {
-  name: string;
-  /** other names that run it, e.g. "clear" for "new" */
-  aliases?: string[];
-  description: string;
-  /** argument hint shown in the menu, e.g. "[provider/model]" */
-  args?: string;
-  /** every candidate for the argument; called when the argument starts being typed, then narrowed by what's typed */
-  complete?: (cli: Cli) => Candidate[] | Promise<Candidate[]>;
-  /** returned text is shown as an info line, a thrown error as an error line */
-  run: (arg: string, cli: Cli) => string | void | Promise<string | undefined> | Promise<void>;
-}
+export type { AgentCommand, Candidate, Command } from "@hortus/core";
 
 /**
  * `/name arg` split up; `arg` is undefined while the name is still being typed (no space after it yet). One line only,
@@ -37,97 +13,21 @@ export function parseCommand(input: string) {
 }
 
 /** The command `name` runs: the one called that, else one with it as an alias. */
-export const findCommand = (commands: Command[], name: string) =>
+export const findCommand = <C extends { name: string; aliases?: string[] }>(commands: C[], name: string) =>
   commands.find((c) => c.name === name) ?? commands.find((c) => c.aliases?.includes(name));
 
 /**
  * `/skills:<name> [request]`, also run as `/<name>` unless a command is called that: a turn starting with the skill's
  * instructions. Commands are matched by name before aliases, so a skill never shadows one.
  */
-export const skillCommand = (skill: Skill): Command => ({
+export const skillCommand = (skill: Skill, cli: Cli): AgentCommand => ({
   name: `skills:${skill.name}`,
   aliases: [skill.name],
   args: "[request]",
   description: skill.description.replace(/\s+/g, " ").trim(),
-  run: async (arg, cli) => void cli.submit(await expandSkill(skill, arg)),
+  plugin: "builtin:skills",
+  run: async (arg) => {
+    if (!cli.submit(await expandSkill(skill, arg))) throw new Error("A turn is running: send it once it's done");
+    return undefined;
+  },
 });
-
-/** /new, /model, /effort and /resume. */
-export const builtinCommands: Command[] = [
-  {
-    name: "new",
-    aliases: ["clear"],
-    description: "Start a new session",
-    // next to the current one; model and provider start from the config again
-    run: async (_, cli) => cli.setSession(await openSession(null, dirname(cli.session.path))),
-  },
-  {
-    name: "model",
-    args: "[provider/model]",
-    description: "Switch the provider and model",
-    // listed afresh each time, so a provider that failed shows up once it works; the menu shows the last list meanwhile
-    complete: async (cli) =>
-      (await cli.agent.listModels()).map(({ provider, id }) => ({
-        value: `${provider}/${id}`,
-        label: id,
-        description: provider,
-      })),
-    run: async (arg, cli) => {
-      if (!arg) {
-        // resolved, so the config's defaults show too
-        const { status } = cli.ui.getState();
-        return status ? `Model: ${status.name}/${status.model}` : "No model selected";
-      }
-      // the provider ends at the first "/"; model ids may have more (openrouter/anthropic/claude-sonnet-4.5)
-      const [, provider, model] = arg.match(/^([^/\s]+)\/(\S+)$/) ?? [];
-      if (!provider || !model) throw new Error("Usage: /model <provider>/<model>");
-      // the session shown now, even if another is shown while resolving
-      const { session } = cli;
-      // throws for a provider missing from secrets.json or of an unknown type
-      await cli.agent.resolve({ provider, model });
-      await session.setModel(model, provider);
-      return `Model set to ${provider}/${model}`;
-    },
-  },
-  {
-    name: "effort",
-    aliases: ["thinking"],
-    args: "[level]",
-    description: "Set the thinking effort (shift+tab cycles it)",
-    // only the ones the model takes, when the API reports them
-    complete: (cli) => [
-      { value: "auto", description: "provider default" },
-      ...EFFORTS.filter((e) => supports(cli.ui.getState(), e)).map((value) => ({ value })),
-    ],
-    run: (arg, cli) => {
-      if (!arg) return `Effort: ${cli.ui.getState().effort ?? "auto"}`;
-      if (arg !== "auto" && !EFFORTS.includes(arg as Effort))
-        throw new Error(`Usage: /effort <auto|${EFFORTS.join("|")}>`);
-      if (arg !== "auto" && !supports(cli.ui.getState(), arg as Effort))
-        throw new Error(`${cli.ui.getState().status?.model} doesn't support effort ${arg}`);
-      cli.setEffort(arg === "auto" ? undefined : (arg as Effort));
-      return `Effort set to ${arg}`;
-    },
-  },
-  {
-    name: "resume",
-    args: "[session]",
-    description: "Resume a session",
-    // the sessions next to the shown one, newest first, without it; titles on one line, like the session picker's
-    complete: async (cli) =>
-      (await listSessions(dirname(cli.session.path)))
-        .filter((s) => s.path !== cli.session.path)
-        .map((s) => ({
-          value: s.id,
-          label: `${stamp(s.created)}  ${s.title.replace(/\s+/g, " ") || "(no messages)"}`,
-        })),
-    run: async (arg, cli) => {
-      const { path } = cli.session;
-      // no id: the first candidate, so Enter while they're still loading picks what it would have
-      const s = (await listSessions(dirname(path))).find((s) => (arg ? s.id === arg : s.path !== path));
-      if (!s) throw new Error(arg ? `Session not found: ${arg}` : "No sessions to resume");
-      // at its last entry, like `hortus -r`
-      cli.setSession(await openSession(s.leafId, dirname(path)));
-    },
-  },
-];

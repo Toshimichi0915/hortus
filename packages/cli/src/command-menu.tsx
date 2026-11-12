@@ -1,11 +1,14 @@
 import { Box, type Key, Text } from "ink";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import stringWidth from "string-width";
+import type { CliPlugin } from "./api.ts";
 import type { Cli } from "./cli.ts";
-import { type Candidate, type Command, findCommand, parseCommand } from "./commands.ts";
-import { theme } from "./entry.ts";
+import { type AgentCommand, type Candidate, findCommand, parseCommand } from "./commands.ts";
+import { theme } from "./themes.ts";
 
-/** One row of the `/` menu, and the input once it's chosen. */
+type Command = Pick<AgentCommand, "name" | "aliases" | "description" | "args" | "complete" | "plugin">;
+
+/** One row of the prompt's menu, and the whole input once it's chosen. */
 export interface Suggestion {
   label: string;
   /** dim text after the label */
@@ -27,11 +30,14 @@ const byRank = (matches: { rank: number; row: Suggestion }[]) =>
     .sort((a, b) => a.rank - b.rank)
     .map((m) => m.row);
 
+/** A command's key in `loaded`: its plugin and name, so a same-named command of another plugin isn't shown its list. */
+export const loadedKey = (c: Pick<Command, "name" | "plugin">) => `${c.plugin}/${c.name}`;
+
 /**
- * The `/` menu's rows for `input`: commands while the name is typed, then the command's candidates from `loaded` for
- * its argument; undefined while those are still loading.
+ * The `/` menu's rows for `input`: commands while the name is typed, then the command's candidates from `loaded` (by
+ * `loadedKey`) for its argument; undefined while those are still loading.
  */
-export function suggest(commands: Command[], input: string, loaded: Map<Command, Candidate[]>) {
+export function suggest(commands: Command[], input: string, loaded: Map<string, Candidate[]>) {
   const parsed = parseCommand(input);
   if (!parsed) return [];
   const { name, arg } = parsed;
@@ -54,7 +60,7 @@ export function suggest(commands: Command[], input: string, loaded: Map<Command,
         .sort((a, b) => a.shown.localeCompare(b.shown)),
     );
   const cmd = findCommand(commands, name);
-  const candidates = cmd?.complete ? loaded.get(cmd) : [];
+  const candidates = cmd?.complete ? loaded.get(loadedKey(cmd)) : [];
   return (
     candidates &&
     byRank(
@@ -74,20 +80,44 @@ export function suggest(commands: Command[], input: string, loaded: Map<Command,
  * shows; `hide` is Esc.
  */
 export function useCommandMenu(cli: Cli, input: string, setInput: (value: string) => void) {
-  // each command's last candidates, so coming back to its argument doesn't show Loading… again
-  const [loaded, setLoaded] = useState(() => new Map<Command, Candidate[]>());
+  // plugins' `cli.complete` wrappers, in load order (later ones outermost); one that throws falls back to its Default
+  const menu = useMemo(() => {
+    let reported = false;
+    return cli.agent.plugins.reduce(
+      (Default: (input: string, loaded: Map<string, Candidate[]>) => Suggestion[] | undefined, { name, plugin }) => {
+        const wrap = (plugin as CliPlugin).cli?.complete;
+        if (!wrap) return Default;
+        const ctx = cli.agent.ctxOf?.(name) ?? cli.agent.ctx;
+        return (input, loaded) => {
+          try {
+            return wrap(input, (i) => Default(i, loaded), cli, ctx);
+          } catch (e) {
+            if (!reported) cli.report(`A completion plugin failed: ${e instanceof Error ? e.message : String(e)}`);
+            reported = true;
+            return Default(input, loaded);
+          }
+        };
+      },
+      (i, loaded) => suggest(cli.commands, i, loaded),
+    );
+  }, [cli]);
+  // each command's last candidates by `loadedKey`, so coming back to its argument doesn't show Loading… again
+  const [loaded, setLoaded] = useState(() => new Map<string, Candidate[]>());
   const parsed = parseCommand(input);
+  // `cli.commands` is listed anew at each read: the command is told by its plugin and name
   const cmd = parsed?.arg === undefined ? undefined : findCommand(cli.commands, parsed.name);
+  const name = cmd && loadedKey(cmd);
   // the latest call per command, so an older, slower one can't overwrite its list (one still running when the argument
   // is left keeps its list for next time)
-  const calls = useRef(new Map<Command, number>());
+  const calls = useRef(new Map<string, number>());
   // once each time the argument starts being typed, not per keystroke
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `cmd` is a fresh object at every render; `name` (its key) stands for it
   useEffect(() => {
     const complete = cmd?.complete;
-    if (!cmd || !complete) return;
-    const n = (calls.current.get(cmd) ?? 0) + 1;
-    calls.current.set(cmd, n);
-    const latest = () => calls.current.get(cmd) === n;
+    if (!cmd || !name || !complete) return;
+    const n = (calls.current.get(name) ?? 0) + 1;
+    calls.current.set(name, n);
+    const latest = () => calls.current.get(name) === n;
     const keep = (list: unknown) => {
       // plugin code: candidates that aren't all strings are left out, and so are repeats (rows are told apart by value)
       const next = [
@@ -99,15 +129,15 @@ export function useCommandMenu(cli: Cli, input: string, setInput: (value: string
       ];
       // an unchanged list leaves the rows, and so the selection, as they are
       if (latest())
-        setLoaded((m) => (JSON.stringify(m.get(cmd)) === JSON.stringify(next) ? m : new Map(m).set(cmd, next)));
+        setLoaded((m) => (JSON.stringify(m.get(name)) === JSON.stringify(next) ? m : new Map(m).set(name, next)));
     };
     // the promise turns a sync throw into a rejection too
-    new Promise<Candidate[]>((resolve) => resolve(complete(cli))).then(keep, (e) => {
+    new Promise<Candidate[]>((resolve) => resolve(complete())).then(keep, (e) => {
       if (latest()) cli.report(`Completing /${cmd.name} failed: ${e instanceof Error ? e.message : String(e)}`);
       keep([]);
     });
-  }, [cli, cmd]);
-  const rows = suggest(cli.commands, input, loaded);
+  }, [cli, name]);
+  const rows = menu(input, loaded);
 
   // the selected row's value, so a refreshed list keeps that row selected; none, or one that's gone, is the first row
   const [sel, setSel] = useState<string>();

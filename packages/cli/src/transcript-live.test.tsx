@@ -45,7 +45,15 @@ const counter: ToolBlock = {
 };
 const tools = (name: string) => (name === "counter" ? counter : (builtinTools[name] ?? genericTool));
 
-const settle = () => sleep(150);
+/** Retries `check` (assertions) until it passes, or rethrows its last failure after `ms`: Ink draws asynchronously. */
+async function until(check: () => void, ms = 3000) {
+  for (const end = Date.now() + ms; ; await sleep(10))
+    try {
+      return check();
+    } catch (e) {
+      if (Date.now() > end) throw e;
+    }
+}
 
 test("blocks off screen stay mounted, and the pane scrolls over their measured heights", async () => {
   // 20 blocks of 5 rows (background, header, blank, output, background) or 3 (background, line, background)
@@ -62,20 +70,22 @@ test("blocks off screen stay mounted, and the pane scrolls over their measured h
     { stdin: term.stdin as never, stdout: term.stdout as never, debug: true, patchConsole: false },
   );
   try {
-    await settle();
     // follows the bottom: the last block (19, a counter) ends the pane; above it the gap row and block 18
-    assert.deepEqual(term.frame().slice(-8), ["$ echo 18", "", "18", "", "", "", "counter 19 mount 10", ""]);
+    await until(() => {
+      assert.deepEqual(term.frame().slice(-8), ["$ echo 18", "", "18", "", "", "", "counter 19 mount 10", ""]);
+      assert.equal(laidOut.get(19), 1);
+      assert.equal(laidOut.get(1), 0, "a block off screen is hidden");
+    });
     assert.equal(mounts, 10, "every counter block mounted once");
-    assert.equal(laidOut.get(19), 1);
-    assert.equal(laidOut.get(1), 0, "a block off screen is hidden");
 
     // to the top, half a pane per PageUp; the rows add up, so it lands exactly on the first block
     term.stdin.write("\x1b[5~".repeat(30));
-    await settle();
-    assert.deepEqual(term.frame().slice(0, 6), ["", "$ echo 0", "", "0", "", ""]);
-    assert.equal(term.frame()[7], "counter 1 mount 1", "the first counter block wasn't remounted");
+    await until(() => {
+      assert.deepEqual(term.frame().slice(0, 6), ["", "$ echo 0", "", "0", "", ""]);
+      assert.equal(term.frame()[7], "counter 1 mount 1", "the first counter block wasn't remounted");
+      assert.deepEqual([laidOut.get(1), laidOut.get(19)], [1, 0]);
+    });
     assert.equal(mounts, 10);
-    assert.deepEqual([laidOut.get(1), laidOut.get(19)], [1, 0]);
   } finally {
     app.unmount();
   }
@@ -100,12 +110,10 @@ test("a block that grows when its result arrives is measured again, so the pane 
     patchConsole: false,
   });
   try {
-    await settle();
-    assert.deepEqual(term.frame().slice(-3), ["", "$ seq 3", ""]);
+    await until(() => assert.deepEqual(term.frame().slice(-3), ["", "$ seq 3", ""]));
     // the same entry (same id) with its result, as cli.ts replaces it
     app.rerender(view([...filler, { ...running, result: { id: "1", output: "1\n2\n3\n" } }]));
-    await settle();
-    assert.deepEqual(term.frame().slice(-7), ["", "$ seq 3", "", "1", "2", "3", ""]);
+    await until(() => assert.deepEqual(term.frame().slice(-7), ["", "$ seq 3", "", "1", "2", "3", ""]));
   } finally {
     app.unmount();
   }

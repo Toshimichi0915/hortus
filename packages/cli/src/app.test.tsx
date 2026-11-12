@@ -13,8 +13,12 @@ const cli = {
     session: createStore(() => ({ messages: [] })),
     entries: [],
     live: { thinking: "", text: "" },
-    turn: [],
     busy: false,
+    statuses: {},
+    asks: [],
+    input: "",
+    expanded: false,
+    theme: "dark",
   })),
 } as unknown as Cli;
 
@@ -95,6 +99,21 @@ test("composeTools wraps a tool's built-in renderer in load order, and copies a 
   const own = linesRenderer(() => [[{ text: "drawn" }]]);
   const withText = composeTools([{ cli: { tools: { bash: { ...own, text: () => "copied" } } } }], cli, assert.fail);
   assert.equal(withText("bash").text(view("bash")), "copied");
+  // a wrapper's text gets the one it replaced, e.g. to pass it a changed view
+  const changed = composeTools(
+    [
+      {
+        cli: {
+          tools: {
+            bash: { ...own, text: (v, Default) => Default({ ...v, call: { ...v.call, input: { command: "pwd" } } }) },
+          },
+        },
+      },
+    ],
+    cli,
+    assert.fail,
+  );
+  assert.equal(changed("bash").text(view("bash")), "$ pwd");
 });
 
 const throwingTool: CliPlugin = {

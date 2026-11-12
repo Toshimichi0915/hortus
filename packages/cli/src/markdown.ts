@@ -1,6 +1,6 @@
 import type { TextProps } from "ink";
 import stringWidth from "string-width";
-import { theme } from "./entry.ts";
+import { theme } from "./themes.ts";
 
 /** A run of text with one style; a rendered line is a list of these. */
 export interface Span
@@ -21,13 +21,13 @@ export function inline(text: string, style: Style = {}): Span[] {
     const [, , code, b1, b2, strike, i1, i2, label, url] = m;
     const bold = b1 ?? b2;
     const italic = i1 ?? i2;
-    if (code !== undefined) out.push({ ...style, color: theme.accent, text: code });
+    if (code !== undefined) out.push({ ...style, color: theme.mdCode, text: code });
     else if (bold !== undefined) out.push(...inline(bold, { ...style, bold: true }));
     else if (strike !== undefined) out.push(...inline(strike, { ...style, strikethrough: true }));
     else if (italic !== undefined) out.push(...inline(italic, { ...style, italic: true }));
     else if (label !== undefined) {
-      out.push(...inline(label, { ...style, color: theme.blue, underline: true }));
-      if (url !== label) out.push({ ...style, color: theme.muted, text: ` (${url})` });
+      out.push(...inline(label, { ...style, color: theme.mdLink, underline: true }));
+      if (url !== label) out.push({ ...style, color: theme.mdLinkUrl, text: ` (${url})` });
     }
     last = m.index + m[0].length;
   }
@@ -103,7 +103,9 @@ const spanWidth = (spans: Span[]) => stringWidth(spans.map((s) => s.text).join("
  */
 function table(rows: string[], width: number): Span[][] {
   const [head = [], delim = [], ...body] = rows.map(cells);
-  const grid = [head, ...body].map((r) => head.map((_, c) => inline(r[c] ?? "", r === head ? { bold: true } : {})));
+  const grid = [head, ...body].map((r) =>
+    head.map((_, c) => inline(r[c] ?? "", r === head ? { bold: true, color: theme.mdTableHeader } : {})),
+  );
   const widths = head.map((_, c) => Math.max(1, ...grid.map((r) => spanWidth(r[c] ?? []))));
   // ponytail: shrinks one column per step, O(overflow × columns); fine for terminal-sized tables.
   // 2 columns minimum so a wide char still fits; below that the table soft-wraps.
@@ -132,7 +134,7 @@ function table(rows: string[], width: number): Span[][] {
       const d = delim[c] ?? "";
       const left = d.endsWith(":") ? (d.startsWith(":") ? Math.floor(pad / 2) : pad) : 0;
       return [
-        ...(c ? [{ dimColor: true, text: " │ " }] : []),
+        ...(c ? [{ color: theme.mdTableBorder, text: " │ " }] : []),
         ...(left ? [{ text: " ".repeat(left) }] : []),
         ...cell,
         ...(pad - left ? [{ text: " ".repeat(pad - left) }] : []),
@@ -140,7 +142,7 @@ function table(rows: string[], width: number): Span[][] {
     });
   return [
     ...lines(grid[0] ?? []),
-    [{ dimColor: true, text: widths.map((w) => "─".repeat(w)).join("─┼─") }],
+    [{ color: theme.mdTableBorder, text: widths.map((w) => "─".repeat(w)).join("─┼─") }],
     ...grid.slice(1).flatMap(lines),
   ];
 }
@@ -161,7 +163,7 @@ export function markdown(text: string, width: number, src: [number, number][] = 
   let group: { prefix: Span[]; text: string; i: number }[] = [];
   let kind: "para" | "quote" | "bullet" | undefined;
   // `end` = the last source line of the group (a setext underline)
-  const flush = (style: Style = kind === "quote" ? { color: theme.muted } : {}, end?: number) => {
+  const flush = (style: Style = kind === "quote" ? { color: theme.mdQuote } : {}, end?: number) => {
     if (!group.length) return;
     const split: Span[][] = [[]];
     for (const s of inline(group.map((g) => g.text).join("\n"), style))
@@ -182,11 +184,11 @@ export function markdown(text: string, width: number, src: [number, number][] = 
     if (open && (!fence || open.startsWith(fence))) {
       flush();
       fence = fence ? undefined : open;
-      put([{ color: theme.muted, text: line }], i);
+      put([{ color: theme.mdCodeBlockBorder, text: line }], i);
       continue;
     }
     if (fence) {
-      put([{ color: theme.green, text: line }], i);
+      put([{ color: theme.mdCodeBlock, text: line }], i);
       continue;
     }
     if (!line.trim()) {
@@ -196,14 +198,14 @@ export function markdown(text: string, width: number, src: [number, number][] = 
     }
     // setext heading: a paragraph underlined with === or ---
     if (kind === "para" && /^ {0,3}(=+|-+) *$/.test(line)) {
-      flush({ color: theme.yellow, bold: true }, i);
+      flush({ color: theme.mdHeading, bold: true }, i);
       continue;
     }
     const heading = line.match(/^#{1,6}\s+(.*)$/);
     const next = lines[i + 1] ?? "";
     if (heading) {
       flush();
-      put(inline(heading[1] ?? "", { color: theme.yellow, bold: true }), i);
+      put(inline(heading[1] ?? "", { color: theme.mdHeading, bold: true }), i);
     } else if (line.includes("|") && next.includes("|") && DELIM.test(next)) {
       flush();
       let end = i + 2;
@@ -212,19 +214,19 @@ export function markdown(text: string, width: number, src: [number, number][] = 
       i = end - 1;
     } else if (/^ {0,3}([-*_])( *\1){2,} *$/.test(line)) {
       flush();
-      put([{ color: theme.muted, text: "─".repeat(width) }], i);
+      put([{ color: theme.mdHr, text: "─".repeat(width) }], i);
     } else {
       const quote = line.match(/^(\s*)>\s?(.*)$/);
       const bullet = line.match(/^(\s*)[-*+]\s+(.*)$/);
       if (quote) {
         if (kind !== "quote") flush();
         kind = "quote";
-        group.push({ prefix: [{ color: theme.muted, text: `${quote[1]}│ ` }], text: quote[2] ?? "", i });
+        group.push({ prefix: [{ color: theme.mdQuoteBorder, text: `${quote[1]}│ ` }], text: quote[2] ?? "", i });
       } else if (bullet) {
         flush();
         kind = "bullet";
         group.push({
-          prefix: [...(bullet[1] ? [{ text: bullet[1] }] : []), { color: theme.accent, text: "• " }],
+          prefix: [...(bullet[1] ? [{ text: bullet[1] }] : []), { color: theme.mdListBullet, text: "• " }],
           text: bullet[2] ?? "",
           i,
         });

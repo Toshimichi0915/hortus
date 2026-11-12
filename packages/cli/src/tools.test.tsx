@@ -19,6 +19,12 @@ test("built-in blocks show a pi-style header and a tail/head preview", () => {
     text({ call: bash, result: { id: "1", output: "1\n2\n3\n4\n5\n6\n7\n8\n" }, width: 40 }),
     "$ seq 8\n\n... (3 earlier lines)\n4\n5\n6\n7\n8",
   );
+  // while running: the live output builtin:bash streams, without colour codes
+  assert.equal(text({ call: bash, details: { output: "\x1b[32m1\x1b[0m\n2\n" }, width: 40 }), "$ seq 8\n\n1\n2");
+  // a progress bar shows its last state, \r\n ends a line, and other control characters are dropped, live or finished
+  const bar = "10%\r50%\r100%\r\nok\x07\bx\r\n";
+  assert.equal(text({ call: bash, details: { output: bar }, width: 40 }), "$ seq 8\n\n100%\nokx");
+  assert.equal(text({ call: bash, result: { id: "1", output: bar }, width: 40 }), "$ seq 8\n\n100%\nokx");
   const read = { id: "2", name: "read", input: { path: "a.ts", offset: 5, limit: 3 } };
   assert.equal(text({ call: read, result: { id: "2", output: "x" }, width: 40 }).split("\n")[0], "read a.ts:5-7");
   const edit = { id: "3", name: "edit", input: { path: "b.ts", edits: [{ oldText: "a", newText: "b" }] } };

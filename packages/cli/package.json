@@ -6,6 +6,10 @@
     ".": {
       "types": "./dist/api.d.ts",
       "default": "./dist/api.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
     }
   },
   "engines": {
@@ -19,7 +23,8 @@
     "zustand": "^5.0.16"
   },
   "devDependencies": {
-    "@types/react": "^19.3.0"
+    "@types/react": "^19.3.0",
+    "zod": "^4.6.7"
   },
   "license": "MIT",
   "files": [

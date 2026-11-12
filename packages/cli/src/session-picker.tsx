@@ -47,14 +47,14 @@ export function SessionPicker({
       <Text>
         <Text color={theme.accent}>Resume session › </Text>
         {query}
-        <Text inverse> </Text>
+        <Text backgroundColor={theme.accent}> </Text>
       </Text>
       {shown.length === 0 && <Text color={theme.dim}>No matching sessions</Text>}
       {shown.slice(start, start + height).map((s, i) => {
         const color = start + i === at ? theme.accent : undefined;
         return (
           <Text key={s.id} wrap="truncate-end" color={color}>
-            <Text color={color ?? theme.dim}>{stamp(s.created)}  </Text>
+            <Text color={color ?? theme.dim}>{`${stamp(s.created)}  `}</Text>
             {s.title.replace(/\s+/g, " ") || "(no messages)"}
           </Text>
         );

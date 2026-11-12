@@ -68,31 +68,41 @@ export function moveRow(chars: string[], pos: number, width: number, dir: -1 | 1
 
 /** Multi-line text input: Enter submits, Shift+Enter (or Alt+Enter where the terminal can't report Shift) inserts a newline.
  * ↑/↓ move between visual rows; `onCaretRow` reports the caret's row counted from the bottom, so a scroller can follow it.
- * `onKey` sees every key first; returning true keeps it from the input. */
+ * `onKey` sees every key first; returning true keeps it from the input. `mask` draws each character as `*`. `onChange`
+ * also gets the caret (a code-point index); a `caret` prop other than the one last reported moves it there (undefined:
+ * a `value` the parent changed puts it at the end). */
 export function PromptInput({
   value,
+  caret: wanted,
   onChange,
   onSubmit,
   onKey,
   onCaretRow,
+  mask,
 }: {
   value: string;
-  onChange: (value: string) => void;
+  caret?: number;
+  onChange: (value: string, caret: number) => void;
   onSubmit: (value: string) => void;
   onKey?: (input: string, key: Key) => boolean;
   onCaretRow?: (fromBottom: number) => void;
+  mask?: boolean;
 }) {
   // cursor counts code points, so emoji move as one step
   const chars = [...value];
+  // what's drawn (and so laid out): one `*` per character when masked
+  const shown = (c: string[]) => (mask ? c.map((ch) => (ch === "\n" ? ch : "*")) : c);
   // kept with the value it was placed in: a value the parent put there instead (the clear on submit, a menu fill)
   // puts the caret at its end
   const [cursor, setCursor] = useState({ value, pos: chars.length });
-  const pos = cursor.value === value ? cursor.pos : chars.length;
+  const placed = wanted === undefined ? undefined : Math.max(0, Math.min(wanted, chars.length));
+  const pos =
+    cursor.value === value && (placed === undefined || placed === cursor.pos) ? cursor.pos : (placed ?? chars.length);
 
   // wrap ourselves (instead of letting Ink) so we know which row/column the caret lands on
   const ref = useRef<DOMElement>(null);
   const width = useBoxMetrics(ref).width || Number.MAX_SAFE_INTEGER;
-  const { rows, caret } = layout(chars, pos, width);
+  const { rows, caret } = layout(shown(chars), pos, width);
 
   // keys can arrive faster than renders (e.g. held Backspace while a reply streams), so each one
   // builds on the previous key's result, not on this render's possibly stale props
@@ -101,9 +111,9 @@ export function PromptInput({
   const update = (next: string[], at: number) => {
     const text = next.join("");
     latest.current = { chars: next, pos: at };
-    onChange(text);
+    onChange(text, at);
     setCursor({ value: text, pos: at });
-    const { rows, caret } = layout(next, at, width);
+    const { rows, caret } = layout(shown(next), at, width);
     onCaretRow?.(rows.length - 1 - caret.row);
   };
 
@@ -116,7 +126,7 @@ export function PromptInput({
       if (key.shift || key.meta) insert("\n");
       else onSubmit(chars.join(""));
     } else if (key.upArrow || key.downArrow) {
-      const at = moveRow(chars, pos, width, key.upArrow ? -1 : 1);
+      const at = moveRow(shown(chars), pos, width, key.upArrow ? -1 : 1);
       if (at !== undefined) update(chars, at);
     } else if (key.leftArrow || (key.ctrl && input === "b")) update(chars, Math.max(0, pos - 1));
     else if (key.rightArrow || (key.ctrl && input === "f")) update(chars, Math.min(chars.length, pos + 1));

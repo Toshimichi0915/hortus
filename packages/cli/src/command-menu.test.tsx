@@ -1,22 +1,23 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { stripVTControlCharacters } from "node:util";
-import type { Candidate, Command } from "./commands.ts";
+import type { AgentCommand as Command, Candidate } from "./commands.ts";
 import { theme } from "./entry.ts";
 
 // colors are off when stdout isn't a terminal; forced (truecolor, so no two theme colors collapse) before ink loads chalk
 process.env.FORCE_COLOR = "3";
 const { renderToString, Text } = await import("ink");
-const { CommandMenu, suggest } = await import("./command-menu.tsx");
+const { CommandMenu, loadedKey, suggest } = await import("./command-menu.tsx");
 
-const run = () => {};
-const model: Command = { name: "model", args: "[provider/model]", description: "Switch the model", run };
+const run = async () => undefined;
+const plugin = "test";
+const model: Command = { name: "model", args: "[provider/model]", description: "Switch the model", run, plugin };
 const commands: Command[] = [
   model,
-  { name: "provider", args: "<name>", description: "Switch the provider", run },
-  { name: "new", aliases: ["clear"], description: "Start a new session", run },
-  { name: "resume", description: "Resume a session", run },
-  { name: "theme", description: "Pick a theme", complete: () => [], run },
+  { name: "provider", args: "<name>", description: "Switch the provider", run, plugin },
+  { name: "new", aliases: ["clear"], description: "Start a new session", run, plugin },
+  { name: "resume", description: "Resume a session", run, plugin },
+  { name: "theme", description: "Pick a theme", complete: async () => [], run, plugin },
 ];
 const models: Candidate[] = [
   { value: "openai/gpt-5", label: "gpt-5", description: "openai" },
@@ -28,8 +29,8 @@ const models: Candidate[] = [
   { value: "ollama-cloud/deepseek-v4.1-flash:1017", label: "deepseek-v4.1-flash:1017", description: "ollama-cloud" },
   { value: "ollama-cloud/gpt-oss:120b" },
 ];
-model.complete = () => models;
-const loaded = new Map([[model, models]]);
+model.complete = async () => models;
+const loaded = new Map([[loadedKey(model), models]]);
 const values = (input: string) => suggest(commands, input, loaded)?.map((s) => s.value);
 
 test("names: substring of a name or alias, ignoring case, best rank first, then alphabetical", () => {
@@ -49,7 +50,7 @@ test("names: substring of a name or alias, ignoring case, best rank first, then 
   assert.deepEqual(values("/new"), ["/new"]);
   assert.deepEqual(values("/nope"), []);
   // an alias another command is named after runs that one, so only it shows
-  const clear: Command = { name: "clear", description: "Clear the screen", run };
+  const clear: Command = { name: "clear", description: "Clear the screen", run, plugin };
   assert.deepEqual(suggest([...commands, clear], "/cl", loaded), [
     { label: "/clear", description: "Clear the screen", value: "/clear" },
   ]);
@@ -73,7 +74,7 @@ test("arguments: the command's candidates containing what's typed, filled in as 
   assert.equal(suggest(commands, "/model gpt-oss", loaded)?.[0]?.label, "ollama-cloud/gpt-oss:120b");
   assert.equal(values("/model ")?.length, 4);
   // the label counts too: a model named m0 ranks above models whose provider merely has an m
-  const named = new Map([[model, [{ value: "ollama-cloud/x" }, { value: "other/m0", label: "m0" }]]]);
+  const named = new Map([[loadedKey(model), [{ value: "ollama-cloud/x" }, { value: "other/m0", label: "m0" }]]]);
   assert.deepEqual(
     suggest(commands, "/model m", named)?.map((s) => s.value),
     ["/model other/m0", "/model ollama-cloud/x"],
@@ -81,7 +82,7 @@ test("arguments: the command's candidates containing what's typed, filled in as 
   // but an exact value beats a label equal to it, so Enter on a filled value submits rather than refilling
   const routed = new Map([
     [
-      model,
+      loadedKey(model),
       [
         { value: "openrouter/openai/gpt-5", label: "openai/gpt-5" },
         { value: "openai/gpt-5", label: "gpt-5" },
@@ -96,6 +97,9 @@ test("no rows without a one-line command whose candidates exist; undefined while
   assert.equal(suggest(commands, "/model deep", new Map()), undefined);
   for (const input of ["", "hi /model", "/model deepseek\n", "/model\ndeepseek", "/new now", "/nope x"])
     assert.deepEqual(suggest(commands, input, loaded), [], input);
+  // a same-named command of another plugin (one replaced it) loads its own list instead of showing the old one's
+  const replaced = commands.map((c) => (c === model ? { ...model, plugin: "other" } : c));
+  assert.equal(suggest(replaced, "/model deep", loaded), undefined);
 });
 
 test("the menu shows five rows around the accent selection, descriptions in a column, Loading… until known", () => {
