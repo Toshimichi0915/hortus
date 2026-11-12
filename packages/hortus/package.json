@@ -1,0 +1,24 @@
+{
+  "name": "hortus",
+  "version": "0.1.0",
+  "description": "A terminal coding agent (installs @hortus/cli)",
+  "type": "module",
+  "engines": {
+    "node": ">=22.15"
+  },
+  "dependencies": {
+    "@hortus/cli": "workspace:*"
+  },
+  "license": "MIT",
+  "files": [
+    "index.js"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Toshimichi0915/hortus.git",
+    "directory": "packages/hortus"
+  },
+  "bin": {
+    "hortus": "index.js"
+  }
+}
