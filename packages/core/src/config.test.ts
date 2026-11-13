@@ -9,8 +9,19 @@ import { loadSecrets } from "./secrets.ts";
 // not tempHome, which writes config and secrets: this test starts without them
 const HOME = await mkdtemp(join(tmpdir(), "hortus-"));
 process.env.HOME = HOME;
+delete process.env.HORTUS_HOME;
 after(() => rm(HOME, { recursive: true, force: true }));
 const HORTUS_DIR = hortusDir();
+
+test("HORTUS_HOME overrides ~/.hortus", () => {
+  process.env.HORTUS_HOME = "/elsewhere";
+  try {
+    assert.equal(hortusDir(), "/elsewhere");
+  } finally {
+    delete process.env.HORTUS_HOME;
+  }
+  assert.equal(hortusDir(), join(HOME, ".hortus"));
+});
 
 test("missing files read as empty, invalid ones throw instead of reading as empty", async () => {
   assert.deepEqual(await loadConfig(), {});

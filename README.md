@@ -52,7 +52,7 @@ In the TUI: `/` opens the command menu (`/new`, `/resume`, `/model`, `/effort`, 
 - MCP servers from `~/.hortus/mcp.json` (the usual `mcpServers` format). Their tools are called from scripts through the `codemode` tool.
 - Plugins from `~/.hortus/plugins/<dir>/hortus.json`.
 
-Sessions are saved as JSONL under `~/.hortus/sessions/`.
+Sessions are saved as JSONL under `~/.hortus/sessions/`. Set `HORTUS_HOME` to use another directory than `~/.hortus`.
 
 ## Plugins
 

@@ -104,6 +104,7 @@ export async function tempHome(files: HomeFiles = {}): Promise<() => Promise<voi
     }
   }
   process.env.HOME = home;
+  delete process.env.HORTUS_HOME; // else it would win over the temp HOME (spawned hortus inherits this env too)
   // HOME stays on the (removed) temp dir: `t.after` hooks run in registration order, so an `agent.close()` /
   // `cli.close()` registered after this one still flushes its saves, which must never land in the real ~/.hortus
   return async () => {

@@ -4,8 +4,8 @@ import { join } from "node:path";
 import * as z from "zod";
 import { EFFORTS } from "./llm.ts";
 
-/** `~/.hortus`, read from `HOME` on every call, so tests can point it elsewhere (see `testing.ts`). */
-export const hortusDir = () => join(homedir(), ".hortus");
+/** `$HORTUS_HOME`, else `~/.hortus`, read on every call, so tests can point it elsewhere (see `testing.ts`). */
+export const hortusDir = () => process.env.HORTUS_HOME || join(homedir(), ".hortus");
 
 export const ConfigSchema = z.object({
   provider: z.string().optional(),
